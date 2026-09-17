@@ -386,23 +386,21 @@ contract BandHookFundBurnsOldCoreTest is Test {
         assertEq(heldByManager(lo1, hi1, CORE_SALT), 0, "old band still empty");
     }
 
-    /// 9. Alice funds while the feed has gone quiet: the band centres on the pool price.
-    /// @dev Pins the `fresh ? oracleTick : poolTick` fallback. Audit finding C1 is that this
-    /// branch exists at all; when C1 is fixed this call reverts StaleOracle instead.
-    function test_staleOracle_centresOnThePoolPrice() public {
+    /// 9. Alice funds while the feed has gone quiet. Audit finding C1: this used to centre
+    /// the band on the pool price, which is a number a stranger can set for free. It refuses.
+    function test_staleOracle_fundIsRefused() public {
         hook.fund(id, FUND, FUND);
-        (int24 lo1, int24 hi1,,) = coreRecord();
+        (int24 lo1, int24 hi1,, uint128 liqBefore) = coreRecord();
 
         pushPoolToTick(bob, 300);
-        int24 pool = poolTick();
         skip(2 hours);
 
+        vm.expectRevert(BandHook.StaleOracle.selector);
         hook.fund(id, FUND, FUND);
-        (,, int24 center,) = coreRecord();
 
-        assertEq(center, pool, "centre came from the pool price, not the oracle");
-        assertEq(heldByManager(lo1, hi1, CORE_SALT), 0, "the old band was still burned");
-        assertCoreRecordMatchesManager();
+        (,,, uint128 liqAfter) = coreRecord();
+        assertEq(liqAfter, liqBefore, "the existing band is untouched");
+        assertEq(heldByManager(lo1, hi1, CORE_SALT), liqBefore, "and still held by the manager");
     }
 
     /// 10. A pool configured with no backstop: only the core is ever minted.

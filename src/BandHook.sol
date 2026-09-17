@@ -243,11 +243,21 @@ contract BandHook is IUnlockCallback {
 
     /// @notice Pull tokens from the owner and mint backstop + core around the oracle price.
     /// If currency0 is native ETH, amount0 must be sent as msg.value.
+    /// @dev Refuses when the oracle is stale or the pool disagrees with it by more than
+    /// `guardTicks`, on every call and not only the first. Capital placed against an
+    /// unverified pool price is placed one-sided at that price, which is a trade the owner
+    /// did not intend to make. The same gate `recenter` carries, for the same reason.
     /// @dev Funding a pool that already holds a core replaces that position: the live core
     /// is burned and re-minted together with the new amounts. The backstop is minted once.
     function fund(PoolId id, uint256 amount0, uint256 amount1) external payable onlyOwner {
         PoolConfig storage cfg = config[id];
         if (!cfg.enabled) revert NotEnabled();
+
+        (int24 oracleTick, bool fresh) = _oracleTick(cfg);
+        if (!fresh) revert StaleOracle();
+        (, int24 poolTick,,) = manager.getSlot0(id);
+        if (_absDiff(poolTick, oracleTick) > uint256(int256(cfg.guardTicks))) revert GuardTripped();
+
         PoolKey memory key = keys[id];
         if (key.currency0.isAddressZero()) {
             if (msg.value != amount0) revert BadValue();
@@ -306,9 +316,8 @@ contract BandHook is IUnlockCallback {
             delete core[id];
             delete backstop[id];
         } else {
-            (int24 oracleTick, bool fresh) = _oracleTick(cfg);
-            (, int24 poolTick,,) = manager.getSlot0(id);
-            int24 center = fresh ? oracleTick : poolTick;
+            (int24 center, bool fresh) = _oracleTick(cfg);
+            if (!fresh) revert StaleOracle();
 
             if (action == Action.FUND && cfg.backstopHalfTicks != 0 && backstop[id].liquidity == 0) {
                 // carve out the backstop share first, wide and symmetric
