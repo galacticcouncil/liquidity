@@ -280,21 +280,24 @@ contract BandHookExtendLowerClampsTest is Test {
         assertGt(cliq, 0, "the mirror direction still places liquidity");
     }
 
-    /// Unchanged and deliberately not fixed here: with exactly zero of the scarce token
-    /// _fitBounds never calls _extendLower, so the core is still minted empty. That needs
-    /// a one-sided band, which is a design decision. See findings H3 (second half) and M2.
-    function test_recenter_withoutDust_stillMintsAnEmptyCore() public {
+    /// Audit finding R1. With exactly zero of the scarce token the re-mint would place
+    /// nothing, so the recentre is now refused rather than moving the whole position to
+    /// idle. Placing a one-sided band instead is part two, still a design call for the team.
+    function test_recenter_withoutDust_isRefusedRatherThanStranding() public {
         hook.fund(id, BASE, BASE);
+        (int24 lo, int24 hi,, uint128 liqBefore) = hook.core(id);
+
         pushPoolToTick(1200);
         setOracleTick(poolTick());
 
         (uint256 i0,) = hookIdle();
         assertEq(i0, 0, "no dust of the scarce token");
 
+        vm.expectRevert(BandHook.EmptyBand.selector);
         hook.recenter(id);
-        (,,, uint128 cliq) = hook.core(id);
-        (, uint256 idle1) = hookIdle();
-        assertEq(cliq, 0, "still minted empty");
-        assertGt(idle1, 0, "and the token1 it held is idle");
+
+        (,,, uint128 liqAfter) = hook.core(id);
+        assertEq(liqAfter, liqBefore, "the record is untouched");
+        assertEq(heldByManager(lo, hi, bytes32(0)), liqBefore, "and the position is still live");
     }
 }

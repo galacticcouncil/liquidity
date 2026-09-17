@@ -113,6 +113,7 @@ contract BandHook is IUnlockCallback {
     error NativeTransferFailed();
     error TransferFailed();
     error SourceTickMismatch(int24 expected, int24 actual);
+    error EmptyBand();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -312,6 +313,10 @@ contract BandHook is IUnlockCallback {
     /// branches, and each burns any live core before the shared mint. Minting over a live core
     /// would leave liquidity no call can reach: the record holds the only copy of its bounds,
     /// and no function accepts arbitrary ones.
+    /// @dev The burn is only safe because an empty re-mint reverts. `getLiquidityForAmounts`
+    /// takes the smaller side, so once the price has left the band the held token alone yields
+    /// zero liquidity; without the check the burn would move the whole position to idle and
+    /// nothing could put it back.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(manager)) revert NotManager();
         (Action action, PoolId id) = abi.decode(data, (Action, PoolId));
@@ -344,11 +349,12 @@ contract BandHook is IUnlockCallback {
                 delete core[id];
             }
             (uint256 a0, uint256 a1) = (_available(key.currency0), _available(key.currency1));
-            core[id] = _mintFitted(
+            Pos memory placed = _mintFitted(
                 key, center, cfg.halfBandTicks, cfg.halfBandTicks * MAX_EXTENSION_MULT, a0, a1, CORE_SALT
             );
-            Pos storage c = core[id];
-            emit Recentered(id, center, c.lower, c.upper, c.liquidity);
+            if (placed.liquidity == 0) revert EmptyBand();
+            core[id] = placed;
+            emit Recentered(id, center, placed.lower, placed.upper, placed.liquidity);
         }
         _settleAll(key);
         return "";
