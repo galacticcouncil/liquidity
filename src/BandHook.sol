@@ -94,6 +94,7 @@ contract BandHook is IUnlockCallback {
     int24 internal constant MAX_EXTENSION_MULT = 4;
 
     event Configured(PoolId indexed id);
+    event SourceChanged(PoolId indexed id, address oldSource, address newSource, int24 newTick);
     event Funded(PoolId indexed id, uint256 amount0, uint256 amount1);
     event Recentered(PoolId indexed id, int24 oracleTick, int24 lower, int24 upper, uint128 liquidity);
     event Withdrawn(PoolId indexed id, uint256 amount0, uint256 amount1);
@@ -109,6 +110,7 @@ contract BandHook is IUnlockCallback {
     error BadValue();
     error NativeTransferFailed();
     error TransferFailed();
+    error SourceTickMismatch(int24 expected, int24 actual);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -147,8 +149,8 @@ contract BandHook is IUnlockCallback {
         emit Configured(id);
     }
 
-    /// @notice Tune parameters on a live pool. The price source is intentionally
-    /// not updatable; a bad source means a new pool.
+    /// @notice Tune parameters on a live pool. The price source cannot be changed here;
+    /// use `setSource`, which validates the replacement.
     function setParams(PoolId id, PoolConfig calldata cfg) external onlyOwner {
         PoolConfig storage c = config[id];
         if (address(c.source) == address(0)) revert NotEnabled();
@@ -156,6 +158,34 @@ contract BandHook is IUnlockCallback {
         _validate(cfg);
         config[id] = cfg;
         emit Configured(id);
+    }
+
+    /// @notice Replace a pool's price source. Owner only.
+    /// @param expectedTick The tick the caller believes the new source reports. A source
+    /// with the wrong orientation or the wrong decimals lands nowhere near it, which is the
+    /// one mistake the contract cannot otherwise detect.
+    /// @param tolerance How many ticks of difference to accept. Must not be negative.
+    /// @dev The only way to recover a pool whose source has stopped answering: it never
+    /// calls the old source, so it works even while every swap is reverting.
+    function setSource(PoolId id, IPriceSource newSource, int24 expectedTick, int24 tolerance)
+        external
+        onlyOwner
+    {
+        PoolConfig storage cfg = config[id];
+        if (address(cfg.source) == address(0)) revert NotEnabled();
+        if (address(newSource) == address(0) || tolerance < 0) revert BadConfig();
+
+        (uint256 p, uint256 updatedAt) = newSource.priceX18();
+        if (p == 0 || block.timestamp > updatedAt + cfg.staleAfter) revert BadConfig();
+
+        int24 newTick = _tickFromPriceX18(p);
+        if (_absDiff(newTick, expectedTick) > uint256(int256(tolerance))) {
+            revert SourceTickMismatch(expectedTick, newTick);
+        }
+
+        address old = address(cfg.source);
+        cfg.source = newSource;
+        emit SourceChanged(id, old, address(newSource), newTick);
     }
 
     /// @dev `feeSlopePpm` is deliberately unchecked: zero means a flat fee at the floor,
