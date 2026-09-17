@@ -93,6 +93,8 @@ contract BandHook is IUnlockCallback {
     // hard cap on asymmetric extension of the core band, in half-band multiples
     int24 internal constant MAX_EXTENSION_MULT = 4;
 
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event Configured(PoolId indexed id);
     event SourceChanged(PoolId indexed id, address oldSource, address newSource, int24 newTick);
     event Funded(PoolId indexed id, uint256 amount0, uint256 amount1);
@@ -127,14 +129,20 @@ contract BandHook is IUnlockCallback {
 
     // ---------- ownership
 
+    /// @notice Nominate the next owner. The nominee must call `acceptOwnership`.
+    /// @dev Nominating the zero address cancels a pending handover, since nobody can
+    /// accept from it.
     function transferOwnership(address to) external onlyOwner {
         pendingOwner = to;
+        emit OwnershipTransferStarted(owner, to);
     }
 
     function acceptOwnership() external {
         if (msg.sender != pendingOwner) revert NotOwner();
+        address previous = owner;
         owner = pendingOwner;
         pendingOwner = address(0);
+        emit OwnershipTransferred(previous, owner);
     }
 
     // ---------- configuration
