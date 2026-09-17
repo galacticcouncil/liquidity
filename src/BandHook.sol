@@ -158,12 +158,18 @@ contract BandHook is IUnlockCallback {
         emit Configured(id);
     }
 
+    /// @dev `feeSlopePpm` is deliberately unchecked: zero means a flat fee at the floor,
+    /// which is a supported configuration. Every other field is bounded by what the
+    /// PoolManager will accept later, so a pool that configures can also trade.
     function _validate(PoolConfig calldata cfg) internal pure {
         if (address(cfg.source) == address(0)) revert BadConfig();
-        if (cfg.feeFloor > cfg.feeCap || cfg.feeCap >= LPFeeLibrary.OVERRIDE_FEE_FLAG) revert BadConfig();
+        if (cfg.feeFloor > cfg.feeCap || cfg.feeCap > LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
+        if (cfg.staleAfter == 0) revert BadConfig();
         if (cfg.halfBandTicks <= 0 || cfg.triggerTicks <= 0 || cfg.guardTicks <= 0) revert BadConfig();
+        if (int256(cfg.halfBandTicks) * MAX_EXTENSION_MULT > TickMath.MAX_TICK) revert BadConfig();
         if (cfg.backstopBps > 10_000) revert BadConfig();
         if (cfg.backstopHalfTicks != 0 && cfg.backstopHalfTicks < cfg.halfBandTicks) revert BadConfig();
+        if (cfg.backstopHalfTicks > TickMath.MAX_TICK) revert BadConfig();
     }
 
     // ---------- hook callbacks (only the two flagged ones are ever called)
