@@ -331,6 +331,7 @@ contract BandHook is IUnlockCallback {
         } else {
             (int24 center, bool fresh) = _oracleTick(cfg);
             if (!fresh) revert StaleOracle();
+            if (_wouldPlaceNothing(key, id, core[id])) revert EmptyBand();
 
             if (action == Action.FUND && cfg.backstopHalfTicks != 0 && backstop[id].liquidity == 0) {
                 // carve out the backstop share first, wide and symmetric
@@ -553,6 +554,25 @@ contract BandHook is IUnlockCallback {
         hi = _floorTick(hiNew, spacing); // floor: never require more token0 than held
         int24 capHi = _floorTick(center + maxHalf, spacing);
         if (hi > capHi) hi = capHi;
+    }
+
+    /// @dev Would the core re-mint place nothing? Asked before the burn, so a refusal does
+    /// not pay for one. Both `fund` and `recenter` keep the pool price within `guardTicks` of
+    /// the band centre, so the price is inside the band and the liquidity is the smaller of
+    /// the two sides; an empty side makes it zero. The cheap test is outermost: only when the
+    /// price has left the old band does one side hold nothing, and only then is a balance read
+    /// worth paying for. Conservative - it answers true only when certain, and the check after
+    /// `_mintFitted` catches the rest.
+    function _wouldPlaceNothing(PoolKey memory key, PoolId id, Pos memory old)
+        internal
+        view
+        returns (bool)
+    {
+        if (old.liquidity == 0) return false;
+        (, int24 t,,) = manager.getSlot0(id);
+        if (t >= old.upper) return _available(key.currency0) == 0;
+        if (t <= old.lower) return _available(key.currency1) == 0;
+        return false;
     }
 
     function _settleAll(PoolKey memory key) internal {
