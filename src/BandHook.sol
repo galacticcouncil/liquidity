@@ -206,6 +206,8 @@ contract BandHook is IUnlockCallback {
 
     /// @notice Pull tokens from the owner and mint backstop + core around the oracle price.
     /// If currency0 is native ETH, amount0 must be sent as msg.value.
+    /// @dev Funding a pool that already holds a core replaces that position: the live core
+    /// is burned and re-minted together with the new amounts. The backstop is minted once.
     function fund(PoolId id, uint256 amount0, uint256 amount1) external payable onlyOwner {
         PoolConfig storage cfg = config[id];
         if (!cfg.enabled) revert NotEnabled();
@@ -251,6 +253,10 @@ contract BandHook is IUnlockCallback {
 
     // ---------- unlock callback
 
+    /// @dev The hook keeps one core record per pool. FUND and RECENTER are handled as separate
+    /// branches, and each burns any live core before the shared mint. Minting over a live core
+    /// would leave liquidity no call can reach: the record holds the only copy of its bounds,
+    /// and no function accepts arbitrary ones.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(manager)) revert NotManager();
         (Action action, PoolId id) = abi.decode(data, (Action, PoolId));
@@ -274,6 +280,10 @@ contract BandHook is IUnlockCallback {
                 uint256 b1 = i1 * cfg.backstopBps / 10_000;
                 backstop[id] =
                     _mintFitted(key, center, cfg.backstopHalfTicks, cfg.backstopHalfTicks, b0, b1, BACKSTOP_SALT);
+            }
+            if (action == Action.FUND) {
+                _burn(key, core[id], CORE_SALT);
+                delete core[id];
             }
             if (action == Action.RECENTER) {
                 _burn(key, core[id], CORE_SALT);
