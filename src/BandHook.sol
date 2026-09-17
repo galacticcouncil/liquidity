@@ -108,6 +108,7 @@ contract BandHook is IUnlockCallback {
     error BadConfig();
     error BadValue();
     error NativeTransferFailed();
+    error TransferFailed();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -216,9 +217,9 @@ contract BandHook is IUnlockCallback {
             if (msg.value != amount0) revert BadValue();
         } else {
             if (msg.value != 0) revert BadValue();
-            IERC20Minimal(Currency.unwrap(key.currency0)).transferFrom(msg.sender, address(this), amount0);
+            _safeTransferFrom(Currency.unwrap(key.currency0), msg.sender, address(this), amount0);
         }
-        IERC20Minimal(Currency.unwrap(key.currency1)).transferFrom(msg.sender, address(this), amount1);
+        _safeTransferFrom(Currency.unwrap(key.currency1), msg.sender, address(this), amount1);
         manager.unlock(abi.encode(Action.FUND, id));
         emit Funded(id, amount0, amount1);
     }
@@ -332,8 +333,22 @@ contract BandHook is IUnlockCallback {
             (bool ok,) = to.call{value: amount}("");
             if (!ok) revert NativeTransferFailed();
         } else {
-            IERC20Minimal(Currency.unwrap(c)).transfer(to, amount);
+            _safeTransfer(Currency.unwrap(c), to, amount);
         }
+    }
+
+    /// @dev Reverts unless the transfer really happened. Accepts tokens that return nothing
+    /// as well as tokens that return a bool; treats a `false` return as failure.
+    function _safeTransfer(address token, address to, uint256 amount) internal {
+        (bool ok, bytes memory data) = token.call(abi.encodeCall(IERC20Minimal.transfer, (to, amount)));
+        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    }
+
+    /// @dev As `_safeTransfer`, for pulls from the owner.
+    function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
+        (bool ok, bytes memory data) =
+            token.call(abi.encodeCall(IERC20Minimal.transferFrom, (from, to, amount)));
+        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     }
 
     /// @dev Spendable amount mid-unlock: idle balance adjusted by the transient
@@ -493,7 +508,7 @@ contract BandHook is IUnlockCallback {
                 manager.settle{value: uint256(-delta)}();
             } else {
                 manager.sync(c);
-                IERC20Minimal(Currency.unwrap(c)).transfer(address(manager), uint256(-delta));
+                _safeTransfer(Currency.unwrap(c), address(manager), uint256(-delta));
                 manager.settle();
             }
         } else if (delta > 0) {
