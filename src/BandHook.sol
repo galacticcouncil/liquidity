@@ -436,15 +436,24 @@ contract BandHook is IUnlockCallback {
         return (lo, hi);
     }
 
+    /// @dev Mirror of `_extendUpper`. When the token1 surplus is large enough that the
+    /// implied lower bound would fall below zero, take the widest band allowed instead of
+    /// underflowing; the surplus that still does not fit stays idle in the hook.
     function _extendLower(uint160 sqrtP, uint128 liq, uint256 a1, int24 center, int24 maxHalf, int24 spacing)
         internal
         pure
         returns (int24 lo)
     {
-        uint256 sqrtLoNew = uint256(sqrtP) - FullMath.mulDiv(a1, FixedPoint96.Q96, liq);
-        int24 loNew = sqrtLoNew <= TickMath.MIN_SQRT_PRICE
-            ? TickMath.MIN_TICK
-            : TickMath.getTickAtSqrtPrice(uint160(sqrtLoNew));
+        uint256 sub = FullMath.mulDiv(a1, FixedPoint96.Q96, liq);
+        int24 loNew;
+        if (sub >= uint256(sqrtP)) {
+            loNew = center - maxHalf;
+        } else {
+            uint256 sqrtLoNew = uint256(sqrtP) - sub;
+            loNew = sqrtLoNew <= TickMath.MIN_SQRT_PRICE
+                ? TickMath.MIN_TICK
+                : TickMath.getTickAtSqrtPrice(uint160(sqrtLoNew));
+        }
         lo = _ceilTick(loNew, spacing); // ceil: never require more token1 than held
         int24 floorLo = _ceilTick(center - maxHalf, spacing);
         if (lo < floorLo) lo = floorLo;
