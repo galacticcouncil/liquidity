@@ -21,6 +21,9 @@ contract ChainlinkSource is IPriceSource {
     uint256 public immutable scaleNum;
     uint256 public immutable feedScale;
 
+    /// @notice The token decimals given would scale every price to zero.
+    error BadDecimals();
+
     constructor(IAggregatorV3 _feed, bool _invert, uint8 baseTokenDecimals, uint8 quoteTokenDecimals) {
         feed = _feed;
         invert = _invert;
@@ -28,12 +31,17 @@ contract ChainlinkSource is IPriceSource {
         // price of one raw base unit in raw quote units, X18:
         // human price * 10^quoteDec / 10^baseDec * 1e18
         scaleNum = 10 ** (18 + quoteTokenDecimals) / 10 ** baseTokenDecimals;
+        if (scaleNum == 0) revert BadDecimals();
     }
 
+    /// @dev A price that scales to zero is reported as "no price", the same as a
+    /// non-positive answer. Reverting here would stop every swap in the pool, and the
+    /// hook already treats (0, 0) as stale.
     function priceX18() external view returns (uint256, uint256) {
         (, int256 answer,, uint256 updatedAt,) = feed.latestRoundData();
         if (answer <= 0) return (0, 0);
         uint256 p = uint256(answer) * scaleNum / feedScale;
+        if (p == 0) return (0, 0);
         if (invert) p = 1e36 / p;
         return (p, updatedAt);
     }

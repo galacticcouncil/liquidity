@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
@@ -92,8 +93,15 @@ contract BandHook is IUnlockCallback {
     bytes32 internal constant BACKSTOP_SALT = bytes32(uint256(1));
     // hard cap on asymmetric extension of the core band, in half-band multiples
     int24 internal constant MAX_EXTENSION_MULT = 4;
+    // the permission bits this hook's address must carry: afterInitialize | beforeSwap
+    uint160 internal constant HOOK_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG;
+    // no feed worth trusting is a week behind
+    uint32 internal constant MAX_STALE_AFTER = 7 days;
 
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event Configured(PoolId indexed id);
+    event SourceChanged(PoolId indexed id, address oldSource, address newSource, int24 newTick);
     event Funded(PoolId indexed id, uint256 amount0, uint256 amount1);
     event Recentered(PoolId indexed id, int24 oracleTick, int24 lower, int24 upper, uint128 liquidity);
     event Withdrawn(PoolId indexed id, uint256 amount0, uint256 amount1);
@@ -108,13 +116,20 @@ contract BandHook is IUnlockCallback {
     error BadConfig();
     error BadValue();
     error NativeTransferFailed();
+    error TransferFailed();
+    error SourceTickMismatch(int24 expected, int24 actual);
+    error EmptyBand();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
 
+    /// @dev The PoolManager accepts any non-zero address as a hook for a dynamic-fee pool,
+    /// so a mis-mined deployment succeeds and then charges nothing on every swap. Check here
+    /// as well as in the deploy script, because the contract is what outlives the runbook.
     constructor(IPoolManager _manager, address _owner) {
+        if (uint160(address(this)) & Hooks.ALL_HOOK_MASK != HOOK_FLAGS) revert BadConfig();
         manager = _manager;
         owner = _owner;
     }
@@ -124,14 +139,20 @@ contract BandHook is IUnlockCallback {
 
     // ---------- ownership
 
+    /// @notice Nominate the next owner. The nominee must call `acceptOwnership`.
+    /// @dev Nominating the zero address cancels a pending handover, since nobody can
+    /// accept from it.
     function transferOwnership(address to) external onlyOwner {
         pendingOwner = to;
+        emit OwnershipTransferStarted(owner, to);
     }
 
     function acceptOwnership() external {
         if (msg.sender != pendingOwner) revert NotOwner();
+        address previous = owner;
         owner = pendingOwner;
         pendingOwner = address(0);
+        emit OwnershipTransferred(previous, owner);
     }
 
     // ---------- configuration
@@ -146,8 +167,8 @@ contract BandHook is IUnlockCallback {
         emit Configured(id);
     }
 
-    /// @notice Tune parameters on a live pool. The price source is intentionally
-    /// not updatable; a bad source means a new pool.
+    /// @notice Tune parameters on a live pool. The price source cannot be changed here;
+    /// use `setSource`, which validates the replacement.
     function setParams(PoolId id, PoolConfig calldata cfg) external onlyOwner {
         PoolConfig storage c = config[id];
         if (address(c.source) == address(0)) revert NotEnabled();
@@ -157,12 +178,50 @@ contract BandHook is IUnlockCallback {
         emit Configured(id);
     }
 
+    /// @notice Replace a pool's price source. Owner only.
+    /// @param expectedTick The tick the caller believes the new source reports. A source
+    /// with the wrong orientation or the wrong decimals lands nowhere near it, which is the
+    /// one mistake the contract cannot otherwise detect.
+    /// @param tolerance How many ticks of difference to accept. Must not be negative.
+    /// @dev The only way to recover a pool whose source has stopped answering: it never
+    /// calls the old source, so it works even while every swap is reverting.
+    function setSource(PoolId id, IPriceSource newSource, int24 expectedTick, int24 tolerance)
+        external
+        onlyOwner
+    {
+        PoolConfig storage cfg = config[id];
+        if (address(cfg.source) == address(0)) revert NotEnabled();
+        if (address(newSource) == address(0) || tolerance < 0) revert BadConfig();
+
+        (uint256 p, uint256 updatedAt) = newSource.priceX18();
+        if (p == 0 || block.timestamp > updatedAt + cfg.staleAfter) revert BadConfig();
+
+        int24 newTick = _tickFromPriceX18(p);
+        if (_absDiff(newTick, expectedTick) > uint256(int256(tolerance))) {
+            revert SourceTickMismatch(expectedTick, newTick);
+        }
+
+        address old = address(cfg.source);
+        cfg.source = newSource;
+        emit SourceChanged(id, old, address(newSource), newTick);
+    }
+
+    /// @dev `feeSlopePpm` is deliberately unchecked: zero means a flat fee at the floor,
+    /// which is a supported configuration. Every other field is bounded by what the
+    /// PoolManager will accept later, so a pool that configures can also trade.
     function _validate(PoolConfig calldata cfg) internal pure {
         if (address(cfg.source) == address(0)) revert BadConfig();
-        if (cfg.feeFloor > cfg.feeCap || cfg.feeCap >= LPFeeLibrary.OVERRIDE_FEE_FLAG) revert BadConfig();
+        if (cfg.feeFloor > cfg.feeCap || cfg.feeCap > LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
+        if (cfg.staleAfter == 0 || cfg.staleAfter > MAX_STALE_AFTER) revert BadConfig();
         if (cfg.halfBandTicks <= 0 || cfg.triggerTicks <= 0 || cfg.guardTicks <= 0) revert BadConfig();
+        // outside the band the price escapes `_fitBounds` and the position is placed one-sided
+        if (cfg.guardTicks >= cfg.halfBandTicks || cfg.triggerTicks >= cfg.halfBandTicks) {
+            revert BadConfig();
+        }
+        if (int256(cfg.halfBandTicks) * MAX_EXTENSION_MULT > TickMath.MAX_TICK) revert BadConfig();
         if (cfg.backstopBps > 10_000) revert BadConfig();
         if (cfg.backstopHalfTicks != 0 && cfg.backstopHalfTicks < cfg.halfBandTicks) revert BadConfig();
+        if (cfg.backstopHalfTicks > TickMath.MAX_TICK) revert BadConfig();
     }
 
     // ---------- hook callbacks (only the two flagged ones are ever called)
@@ -206,6 +265,14 @@ contract BandHook is IUnlockCallback {
 
     /// @notice Pull tokens from the owner and mint backstop + core around the oracle price.
     /// If currency0 is native ETH, amount0 must be sent as msg.value.
+    /// @dev Refuses when the oracle is stale or the pool disagrees with it by more than
+    /// `guardTicks`, on every call and not only the first. Capital placed against an
+    /// unverified pool price is placed one-sided at that price, which is a trade the owner
+    /// did not intend to make. The gate lives inside `unlockCallback` rather than here, so
+    /// the price it checks is the same read the mint uses; a token that runs code on
+    /// transfer could otherwise move the pool between a check here and the mint there.
+    /// @dev Funding a pool that already holds a core replaces that position: the live core
+    /// is burned and re-minted together with the new amounts. The backstop is minted once.
     function fund(PoolId id, uint256 amount0, uint256 amount1) external payable onlyOwner {
         PoolConfig storage cfg = config[id];
         if (!cfg.enabled) revert NotEnabled();
@@ -214,9 +281,9 @@ contract BandHook is IUnlockCallback {
             if (msg.value != amount0) revert BadValue();
         } else {
             if (msg.value != 0) revert BadValue();
-            IERC20Minimal(Currency.unwrap(key.currency0)).transferFrom(msg.sender, address(this), amount0);
+            _safeTransferFrom(Currency.unwrap(key.currency0), msg.sender, address(this), amount0);
         }
-        IERC20Minimal(Currency.unwrap(key.currency1)).transferFrom(msg.sender, address(this), amount1);
+        _safeTransferFrom(Currency.unwrap(key.currency1), msg.sender, address(this), amount1);
         manager.unlock(abi.encode(Action.FUND, id));
         emit Funded(id, amount0, amount1);
     }
@@ -251,6 +318,14 @@ contract BandHook is IUnlockCallback {
 
     // ---------- unlock callback
 
+    /// @dev The hook keeps one core record per pool. FUND and RECENTER are handled as separate
+    /// branches, and each burns any live core before the shared mint. Minting over a live core
+    /// would leave liquidity no call can reach: the record holds the only copy of its bounds,
+    /// and no function accepts arbitrary ones.
+    /// @dev The burn is only safe because an empty re-mint reverts. `getLiquidityForAmounts`
+    /// takes the smaller side, so once the price has left the band the held token alone yields
+    /// zero liquidity; without the check the burn would move the whole position to idle and
+    /// nothing could put it back.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(manager)) revert NotManager();
         (Action action, PoolId id) = abi.decode(data, (Action, PoolId));
@@ -263,9 +338,11 @@ contract BandHook is IUnlockCallback {
             delete core[id];
             delete backstop[id];
         } else {
-            (int24 oracleTick, bool fresh) = _oracleTick(cfg);
-            (, int24 poolTick,,) = manager.getSlot0(id);
-            int24 center = fresh ? oracleTick : poolTick;
+            (int24 center, bool fresh) = _oracleTick(cfg);
+            if (!fresh) revert StaleOracle();
+            (uint160 sqrtP, int24 poolTick,,) = manager.getSlot0(id);
+            if (_absDiff(poolTick, center) > uint256(int256(cfg.guardTicks))) revert GuardTripped();
+            if (_wouldPlaceNothing(key, poolTick, core[id])) revert EmptyBand();
 
             if (action == Action.FUND && cfg.backstopHalfTicks != 0 && backstop[id].liquidity == 0) {
                 // carve out the backstop share first, wide and symmetric
@@ -273,18 +350,23 @@ contract BandHook is IUnlockCallback {
                 uint256 b0 = i0 * cfg.backstopBps / 10_000;
                 uint256 b1 = i1 * cfg.backstopBps / 10_000;
                 backstop[id] =
-                    _mintFitted(key, center, cfg.backstopHalfTicks, cfg.backstopHalfTicks, b0, b1, BACKSTOP_SALT);
+                    _mintFitted(key, sqrtP, center, cfg.backstopHalfTicks, cfg.backstopHalfTicks, b0, b1, BACKSTOP_SALT);
+            }
+            if (action == Action.FUND) {
+                _burn(key, core[id], CORE_SALT);
+                delete core[id];
             }
             if (action == Action.RECENTER) {
                 _burn(key, core[id], CORE_SALT);
                 delete core[id];
             }
             (uint256 a0, uint256 a1) = (_available(key.currency0), _available(key.currency1));
-            core[id] = _mintFitted(
-                key, center, cfg.halfBandTicks, cfg.halfBandTicks * MAX_EXTENSION_MULT, a0, a1, CORE_SALT
+            Pos memory placed = _mintFitted(
+                key, sqrtP, center, cfg.halfBandTicks, cfg.halfBandTicks * MAX_EXTENSION_MULT, a0, a1, CORE_SALT
             );
-            Pos storage c = core[id];
-            emit Recentered(id, center, c.lower, c.upper, c.liquidity);
+            if (placed.liquidity == 0) revert EmptyBand();
+            core[id] = placed;
+            emit Recentered(id, center, placed.lower, placed.upper, placed.liquidity);
         }
         _settleAll(key);
         return "";
@@ -294,7 +376,9 @@ contract BandHook is IUnlockCallback {
 
     function _oracleTick(PoolConfig storage cfg) internal view returns (int24 tick, bool fresh) {
         (uint256 p, uint256 updatedAt) = cfg.source.priceX18();
-        if (p == 0 || block.timestamp > updatedAt + cfg.staleAfter) return (0, false);
+        if (p == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > cfg.staleAfter) {
+            return (0, false);
+        }
         tick = _tickFromPriceX18(p);
         fresh = true;
     }
@@ -322,8 +406,22 @@ contract BandHook is IUnlockCallback {
             (bool ok,) = to.call{value: amount}("");
             if (!ok) revert NativeTransferFailed();
         } else {
-            IERC20Minimal(Currency.unwrap(c)).transfer(to, amount);
+            _safeTransfer(Currency.unwrap(c), to, amount);
         }
+    }
+
+    /// @dev Reverts unless the transfer really happened. Accepts tokens that return nothing
+    /// as well as tokens that return a bool; treats a `false` return as failure.
+    function _safeTransfer(address token, address to, uint256 amount) internal {
+        (bool ok, bytes memory data) = token.call(abi.encodeCall(IERC20Minimal.transfer, (to, amount)));
+        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    }
+
+    /// @dev As `_safeTransfer`, for pulls from the owner.
+    function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
+        (bool ok, bytes memory data) =
+            token.call(abi.encodeCall(IERC20Minimal.transferFrom, (from, to, amount)));
+        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     }
 
     /// @dev Spendable amount mid-unlock: idle balance adjusted by the transient
@@ -359,6 +457,7 @@ contract BandHook is IUnlockCallback {
     /// still does not fit stays idle in the hook until the next recenter.
     function _mintFitted(
         PoolKey memory key,
+        uint160 sqrtP,
         int24 center,
         int24 half,
         int24 maxHalf,
@@ -368,7 +467,6 @@ contract BandHook is IUnlockCallback {
     ) internal returns (Pos memory p) {
         if (a0 == 0 && a1 == 0) return p;
         BandSpec memory s = BandSpec({center: center, half: half, maxHalf: maxHalf, spacing: key.tickSpacing});
-        (uint160 sqrtP,,,) = manager.getSlot0(key.toId());
         (int24 lo, int24 hi, uint128 liq) = _computeBand(s, sqrtP, a0, a1);
         if (liq == 0) return p;
         manager.modifyLiquidity(
@@ -426,15 +524,24 @@ contract BandHook is IUnlockCallback {
         return (lo, hi);
     }
 
+    /// @dev Mirror of `_extendUpper`. When the token1 surplus is large enough that the
+    /// implied lower bound would fall below zero, take the widest band allowed instead of
+    /// underflowing; the surplus that still does not fit stays idle in the hook.
     function _extendLower(uint160 sqrtP, uint128 liq, uint256 a1, int24 center, int24 maxHalf, int24 spacing)
         internal
         pure
         returns (int24 lo)
     {
-        uint256 sqrtLoNew = uint256(sqrtP) - FullMath.mulDiv(a1, FixedPoint96.Q96, liq);
-        int24 loNew = sqrtLoNew <= TickMath.MIN_SQRT_PRICE
-            ? TickMath.MIN_TICK
-            : TickMath.getTickAtSqrtPrice(uint160(sqrtLoNew));
+        uint256 sub = FullMath.mulDiv(a1, FixedPoint96.Q96, liq);
+        int24 loNew;
+        if (sub >= uint256(sqrtP)) {
+            loNew = center - maxHalf;
+        } else {
+            uint256 sqrtLoNew = uint256(sqrtP) - sub;
+            loNew = sqrtLoNew <= TickMath.MIN_SQRT_PRICE
+                ? TickMath.MIN_TICK
+                : TickMath.getTickAtSqrtPrice(uint160(sqrtLoNew));
+        }
         lo = _ceilTick(loNew, spacing); // ceil: never require more token1 than held
         int24 floorLo = _ceilTick(center - maxHalf, spacing);
         if (lo < floorLo) lo = floorLo;
@@ -462,6 +569,24 @@ contract BandHook is IUnlockCallback {
         if (hi > capHi) hi = capHi;
     }
 
+    /// @dev Would the core re-mint place nothing? Asked before the burn, so a refusal does
+    /// not pay for one. Both `fund` and `recenter` keep the pool price within `guardTicks` of
+    /// the band centre, so the price is inside the band and the liquidity is the smaller of
+    /// the two sides; an empty side makes it zero. The cheap test is outermost: only when the
+    /// price has left the old band does one side hold nothing, and only then is a balance read
+    /// worth paying for. Conservative - it answers true only when certain, and the check after
+    /// `_mintFitted` catches the rest.
+    function _wouldPlaceNothing(PoolKey memory key, int24 t, Pos memory old)
+        internal
+        view
+        returns (bool)
+    {
+        if (old.liquidity == 0) return false;
+        if (t >= old.upper) return _available(key.currency0) == 0;
+        if (t <= old.lower) return _available(key.currency1) == 0;
+        return false;
+    }
+
     function _settleAll(PoolKey memory key) internal {
         _settleOne(key.currency0);
         _settleOne(key.currency1);
@@ -471,10 +596,13 @@ contract BandHook is IUnlockCallback {
         int256 delta = manager.currencyDelta(address(this), c);
         if (delta < 0) {
             if (c.isAddressZero()) {
+                // v4-core: "if settling native, integrators should still call `sync` first
+                // to avoid DoS attack vectors" - it resets the synced-currency slot
+                manager.sync(c);
                 manager.settle{value: uint256(-delta)}();
             } else {
                 manager.sync(c);
-                IERC20Minimal(Currency.unwrap(c)).transfer(address(manager), uint256(-delta));
+                _safeTransfer(Currency.unwrap(c), address(manager), uint256(-delta));
                 manager.settle();
             }
         } else if (delta > 0) {
