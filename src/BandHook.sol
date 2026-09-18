@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
@@ -92,6 +93,10 @@ contract BandHook is IUnlockCallback {
     bytes32 internal constant BACKSTOP_SALT = bytes32(uint256(1));
     // hard cap on asymmetric extension of the core band, in half-band multiples
     int24 internal constant MAX_EXTENSION_MULT = 4;
+    // the permission bits this hook's address must carry: afterInitialize | beforeSwap
+    uint160 internal constant HOOK_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG;
+    // no feed worth trusting is a week behind
+    uint32 internal constant MAX_STALE_AFTER = 7 days;
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -120,7 +125,11 @@ contract BandHook is IUnlockCallback {
         _;
     }
 
+    /// @dev The PoolManager accepts any non-zero address as a hook for a dynamic-fee pool,
+    /// so a mis-mined deployment succeeds and then charges nothing on every swap. Check here
+    /// as well as in the deploy script, because the contract is what outlives the runbook.
     constructor(IPoolManager _manager, address _owner) {
+        if (uint160(address(this)) & Hooks.ALL_HOOK_MASK != HOOK_FLAGS) revert BadConfig();
         manager = _manager;
         owner = _owner;
     }
@@ -203,8 +212,12 @@ contract BandHook is IUnlockCallback {
     function _validate(PoolConfig calldata cfg) internal pure {
         if (address(cfg.source) == address(0)) revert BadConfig();
         if (cfg.feeFloor > cfg.feeCap || cfg.feeCap > LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
-        if (cfg.staleAfter == 0) revert BadConfig();
+        if (cfg.staleAfter == 0 || cfg.staleAfter > MAX_STALE_AFTER) revert BadConfig();
         if (cfg.halfBandTicks <= 0 || cfg.triggerTicks <= 0 || cfg.guardTicks <= 0) revert BadConfig();
+        // outside the band the price escapes `_fitBounds` and the position is placed one-sided
+        if (cfg.guardTicks >= cfg.halfBandTicks || cfg.triggerTicks >= cfg.halfBandTicks) {
+            revert BadConfig();
+        }
         if (int256(cfg.halfBandTicks) * MAX_EXTENSION_MULT > TickMath.MAX_TICK) revert BadConfig();
         if (cfg.backstopBps > 10_000) revert BadConfig();
         if (cfg.backstopHalfTicks != 0 && cfg.backstopHalfTicks < cfg.halfBandTicks) revert BadConfig();
@@ -363,7 +376,9 @@ contract BandHook is IUnlockCallback {
 
     function _oracleTick(PoolConfig storage cfg) internal view returns (int24 tick, bool fresh) {
         (uint256 p, uint256 updatedAt) = cfg.source.priceX18();
-        if (p == 0 || block.timestamp > updatedAt + cfg.staleAfter) return (0, false);
+        if (p == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > cfg.staleAfter) {
+            return (0, false);
+        }
         tick = _tickFromPriceX18(p);
         fresh = true;
     }
@@ -581,6 +596,9 @@ contract BandHook is IUnlockCallback {
         int256 delta = manager.currencyDelta(address(this), c);
         if (delta < 0) {
             if (c.isAddressZero()) {
+                // v4-core: "if settling native, integrators should still call `sync` first
+                // to avoid DoS attack vectors" - it resets the synced-currency slot
+                manager.sync(c);
                 manager.settle{value: uint256(-delta)}();
             } else {
                 manager.sync(c);
