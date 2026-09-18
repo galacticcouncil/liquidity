@@ -255,18 +255,14 @@ contract BandHook is IUnlockCallback {
     /// @dev Refuses when the oracle is stale or the pool disagrees with it by more than
     /// `guardTicks`, on every call and not only the first. Capital placed against an
     /// unverified pool price is placed one-sided at that price, which is a trade the owner
-    /// did not intend to make. The same gate `recenter` carries, for the same reason.
+    /// did not intend to make. The gate lives inside `unlockCallback` rather than here, so
+    /// the price it checks is the same read the mint uses; a token that runs code on
+    /// transfer could otherwise move the pool between a check here and the mint there.
     /// @dev Funding a pool that already holds a core replaces that position: the live core
     /// is burned and re-minted together with the new amounts. The backstop is minted once.
     function fund(PoolId id, uint256 amount0, uint256 amount1) external payable onlyOwner {
         PoolConfig storage cfg = config[id];
         if (!cfg.enabled) revert NotEnabled();
-
-        (int24 oracleTick, bool fresh) = _oracleTick(cfg);
-        if (!fresh) revert StaleOracle();
-        (, int24 poolTick,,) = manager.getSlot0(id);
-        if (_absDiff(poolTick, oracleTick) > uint256(int256(cfg.guardTicks))) revert GuardTripped();
-
         PoolKey memory key = keys[id];
         if (key.currency0.isAddressZero()) {
             if (msg.value != amount0) revert BadValue();
@@ -331,7 +327,9 @@ contract BandHook is IUnlockCallback {
         } else {
             (int24 center, bool fresh) = _oracleTick(cfg);
             if (!fresh) revert StaleOracle();
-            if (_wouldPlaceNothing(key, id, core[id])) revert EmptyBand();
+            (uint160 sqrtP, int24 poolTick,,) = manager.getSlot0(id);
+            if (_absDiff(poolTick, center) > uint256(int256(cfg.guardTicks))) revert GuardTripped();
+            if (_wouldPlaceNothing(key, poolTick, core[id])) revert EmptyBand();
 
             if (action == Action.FUND && cfg.backstopHalfTicks != 0 && backstop[id].liquidity == 0) {
                 // carve out the backstop share first, wide and symmetric
@@ -339,7 +337,7 @@ contract BandHook is IUnlockCallback {
                 uint256 b0 = i0 * cfg.backstopBps / 10_000;
                 uint256 b1 = i1 * cfg.backstopBps / 10_000;
                 backstop[id] =
-                    _mintFitted(key, center, cfg.backstopHalfTicks, cfg.backstopHalfTicks, b0, b1, BACKSTOP_SALT);
+                    _mintFitted(key, sqrtP, center, cfg.backstopHalfTicks, cfg.backstopHalfTicks, b0, b1, BACKSTOP_SALT);
             }
             if (action == Action.FUND) {
                 _burn(key, core[id], CORE_SALT);
@@ -351,7 +349,7 @@ contract BandHook is IUnlockCallback {
             }
             (uint256 a0, uint256 a1) = (_available(key.currency0), _available(key.currency1));
             Pos memory placed = _mintFitted(
-                key, center, cfg.halfBandTicks, cfg.halfBandTicks * MAX_EXTENSION_MULT, a0, a1, CORE_SALT
+                key, sqrtP, center, cfg.halfBandTicks, cfg.halfBandTicks * MAX_EXTENSION_MULT, a0, a1, CORE_SALT
             );
             if (placed.liquidity == 0) revert EmptyBand();
             core[id] = placed;
@@ -444,6 +442,7 @@ contract BandHook is IUnlockCallback {
     /// still does not fit stays idle in the hook until the next recenter.
     function _mintFitted(
         PoolKey memory key,
+        uint160 sqrtP,
         int24 center,
         int24 half,
         int24 maxHalf,
@@ -453,7 +452,6 @@ contract BandHook is IUnlockCallback {
     ) internal returns (Pos memory p) {
         if (a0 == 0 && a1 == 0) return p;
         BandSpec memory s = BandSpec({center: center, half: half, maxHalf: maxHalf, spacing: key.tickSpacing});
-        (uint160 sqrtP,,,) = manager.getSlot0(key.toId());
         (int24 lo, int24 hi, uint128 liq) = _computeBand(s, sqrtP, a0, a1);
         if (liq == 0) return p;
         manager.modifyLiquidity(
@@ -563,13 +561,12 @@ contract BandHook is IUnlockCallback {
     /// price has left the old band does one side hold nothing, and only then is a balance read
     /// worth paying for. Conservative - it answers true only when certain, and the check after
     /// `_mintFitted` catches the rest.
-    function _wouldPlaceNothing(PoolKey memory key, PoolId id, Pos memory old)
+    function _wouldPlaceNothing(PoolKey memory key, int24 t, Pos memory old)
         internal
         view
         returns (bool)
     {
         if (old.liquidity == 0) return false;
-        (, int24 t,,) = manager.getSlot0(id);
         if (t >= old.upper) return _available(key.currency0) == 0;
         if (t <= old.lower) return _available(key.currency1) == 0;
         return false;

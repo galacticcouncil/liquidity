@@ -83,3 +83,36 @@ contract NoReturnERC20 is BaseToken {
         _move(from, to, amount);
     }
 }
+
+/// @notice Runs somebody else's code in the middle of `transferFrom`, the way an
+/// ERC777-style token does through its send hooks. The token itself is honest; the
+/// callback is registered by a third party.
+interface IPoke {
+    function poke() external;
+}
+
+contract CallbackERC20 is BaseToken {
+    address public onTransferFrom;
+
+    constructor(string memory n, string memory s) BaseToken(n, s) {}
+
+    function setCallback(address c) external {
+        onTransferFrom = c;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        _move(msg.sender, to, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        address c = onTransferFrom;
+        if (c != address(0)) {
+            onTransferFrom = address(0); // fire once, so the callback's own transfers are clean
+            IPoke(c).poke();
+        }
+        _spendAllowance(from, amount);
+        _move(from, to, amount);
+        return true;
+    }
+}
