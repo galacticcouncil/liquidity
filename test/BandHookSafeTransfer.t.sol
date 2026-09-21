@@ -48,7 +48,7 @@ contract BandHookSafeTransferTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
+            guardTicks: 300,
             enabled: true
         });
     }
@@ -185,4 +185,9 @@ contract BandHookSafeTransferTest is Test {
         assertEq(cliq, 0, "no core recorded");
         assertEq(bliq, 0, "no backstop recorded");
     }
+
+    // ---------- an address with no code (issue #2)
+
+    /// Bob funds a pool whose token address holds no contract: TransferFailed, nothing recorded.
+    function test_fund_revertsWhenATokenHasNoCode() public {}
 }

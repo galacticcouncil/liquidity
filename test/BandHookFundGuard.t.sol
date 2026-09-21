@@ -64,7 +64,8 @@ contract BandHookFundGuardTest is Test {
             hooks: IHooks(HOOK_ADDR)
         });
         id = key.toId();
-        hook.configure(key, _cfg(IPriceSource(address(source)), GUARD, 20000));
+        // cap 0.35%: low enough that a 100-tick guard clears the dead band rule
+        hook.configure(key, _cfg(IPriceSource(address(source)), GUARD, 3500));
         manager.initialize(key, TickMath.getSqrtPriceAtTick(0));
 
         nativeKey = PoolKey({
@@ -75,7 +76,8 @@ contract BandHookFundGuardTest is Test {
             hooks: IHooks(HOOK_ADDR)
         });
         nativeId = nativeKey.toId();
-        hook.configure(nativeKey, _cfg(IPriceSource(address(nativeSource)), 150, 10000));
+        // cap 0.8%: low enough that the 150-tick guard clears the dead band rule
+        hook.configure(nativeKey, _cfg(IPriceSource(address(nativeSource)), 150, 8000));
         manager.initialize(nativeKey, TickMath.getSqrtPriceAtTick(78244));
 
         t0.mint(address(this), 5_000_000e18);
@@ -140,6 +142,23 @@ contract BandHookFundGuardTest is Test {
         uint160 s = TickMath.getSqrtPriceAtTick(t);
         uint256 px96 = FullMath.mulDiv(s, s, 1 << 96);
         src.set(FullMath.mulDiv(px96, 1e18, 1 << 96), block.timestamp);
+    }
+
+    function poolTickOf(PoolId pid) internal view returns (int24 t) {
+        (, t,,) = manager.getSlot0(pid);
+    }
+
+    /// The same push as above, for a pool other than the main one.
+    function pushPoolToTick(PoolKey memory k, int24 target) internal {
+        uint160 limit = TickMath.getSqrtPriceAtTick(target);
+        (uint160 current,,,) = manager.getSlot0(k.toId());
+        vm.prank(mallory);
+        swapRouter.swap(
+            k,
+            SwapParams({zeroForOne: limit < current, amountSpecified: -5_000_000e18, sqrtPriceLimitX96: limit}),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
     }
 
     // ---------- a stale oracle

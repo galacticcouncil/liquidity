@@ -72,7 +72,7 @@ contract BandHookForkTest is Test {
                 backstopHalfTicks: 11000, // ~÷3..×3
                 backstopBps: 3500,
                 triggerTicks: 350, // ~3.5%
-                guardTicks: 150,
+                guardTicks: 200,
                 enabled: true
             })
         );

@@ -84,7 +84,7 @@ contract BandHookTest is Test {
             backstopHalfTicks: 16000, // ~÷5..×5
             backstopBps: 3000,
             triggerTicks: 500, // ~5%
-            guardTicks: 100, // ~1%
+            guardTicks: 300, // ~3%
             enabled: true
         });
     }
@@ -185,7 +185,7 @@ contract BandHookTest is Test {
 
     function test_recenter_revertsOnGuard() public {
         _fund();
-        // oracle jumps 6% but pool price still at 0 -> guard (100 ticks) trips
+        // oracle jumps 6% but pool price still at 0 -> guard (300 ticks) trips
         source.set(1.06e18, block.timestamp);
         vm.expectRevert(BandHook.GuardTripped.selector);
         hook.recenter(id);

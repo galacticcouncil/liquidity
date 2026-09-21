@@ -91,7 +91,7 @@ contract BandHookExtendLowerClampsTest is Test {
             backstopHalfTicks: BACKSTOP_HALF,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
+            guardTicks: 300,
             enabled: true
         });
     }

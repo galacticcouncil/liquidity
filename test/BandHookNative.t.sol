@@ -63,7 +63,7 @@ contract BandHookNativeTest is Test {
                 backstopHalfTicks: 11000,
                 backstopBps: 3500,
                 triggerTicks: 350,
-                guardTicks: 150,
+                guardTicks: 200,
                 enabled: true
             })
         );

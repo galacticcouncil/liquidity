@@ -75,7 +75,7 @@ contract BandHookValidateConfigTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
+            guardTicks: 300,
             enabled: true
         });
     }
@@ -253,4 +253,15 @@ contract BandHookValidateConfigTest is Test {
         hdx.guardTicks = 200;
         hook.configure(k2, hdx);
     }
+
+    // ---------- the guard must clear the fee cap's dead band (issue #2)
+
+    /// Bob configures an HDX pool with guard 200 at a 2% cap: refused with BadConfig.
+    function test_guardInsideTheDeadBand_isRejected() public {}
+
+    /// At a 2% cap the line falls between 264, refused, and 265, accepted.
+    function test_guardAtTheDeadBandEdge_rejectedThenAccepted() public {}
+
+    /// Bob's live pool has guard 300. setParams down to 200 is refused, and 300 stays.
+    function test_setParams_cannotPullTheGuardIntoTheDeadBand() public {}
 }

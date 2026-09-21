@@ -78,7 +78,7 @@ contract BandHookGuardRailsTest is Test {
         nativeId = nativeKey.toId();
         BandHook.PoolConfig memory nc = _base();
         nc.source = IPriceSource(address(nativeSource));
-        nc.guardTicks = 150;
+        nc.guardTicks = 300;
         hook.configure(nativeKey, nc);
         manager.initialize(nativeKey, TickMath.getSqrtPriceAtTick(78244));
 
@@ -104,7 +104,7 @@ contract BandHookGuardRailsTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
+            guardTicks: 300,
             enabled: true
         });
     }

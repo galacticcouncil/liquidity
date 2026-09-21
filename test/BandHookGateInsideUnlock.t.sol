@@ -107,7 +107,7 @@ contract BandHookGateInsideUnlockTest is Test {
         return BandHook.PoolConfig({
             source: IPriceSource(address(source)),
             feeFloor: 3000,
-            feeCap: 20000,
+            feeCap: 3500, // low enough that a 100-tick guard clears the dead band rule
             feeSlopePpm: 1_000_000,
             staleAfter: 1 hours,
             halfBandTicks: 1000,

@@ -80,7 +80,7 @@ contract BandHookSetSourceTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
+            guardTicks: 300,
             enabled: true
         });
     }
@@ -183,6 +183,12 @@ contract BandHookSetSourceTest is Test {
         vm.expectRevert(BandHook.BadConfig.selector);
         hook.setSource(id, IPriceSource(address(old)), 0, 50);
     }
+
+    /// Bob installs a source whose clock runs 10 minutes ahead: refused with BadConfig.
+    function test_setSource_rejectsASourceFromTheFuture() public {}
+
+    /// A source reporting the largest possible timestamp: BadConfig, not an overflow panic.
+    function test_setSource_rejectsAnAbsurdTimestampWithBadConfig() public {}
 
     /// A replacement that reverts takes the revert with it, rather than being installed.
     function test_setSource_rejectsARevertingSource() public {

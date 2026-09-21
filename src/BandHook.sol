@@ -17,6 +17,7 @@ import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {FixedPoint96} from "v4-core/libraries/FixedPoint96.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
+import {ProtocolFeeLibrary} from "v4-core/libraries/ProtocolFeeLibrary.sol";
 import {SafeCast} from "v4-core/libraries/SafeCast.sol";
 import {LiquidityAmounts} from "v4-periphery/libraries/LiquidityAmounts.sol";
 import {IPriceSource} from "./interfaces/IPriceSource.sol";
@@ -97,6 +98,9 @@ contract BandHook is IUnlockCallback {
     uint160 internal constant HOOK_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG;
     // no feed worth trusting is a week behind
     uint32 internal constant MAX_STALE_AFTER = 7 days;
+    /// @dev Ticks the guard must clear beyond the fee cap's dead band. The oracle can trail the
+    /// market by about this much: Chainlink ETH/USD only updates on a 0.5% move.
+    uint256 internal constant GUARD_MARGIN_TICKS = 50;
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -185,6 +189,8 @@ contract BandHook is IUnlockCallback {
     /// @param tolerance How many ticks of difference to accept. Must not be negative.
     /// @dev The only way to recover a pool whose source has stopped answering: it never
     /// calls the old source, so it works even while every swap is reverting.
+    /// @dev Freshness is judged exactly as `_oracleTick` judges it, so a source this accepts is
+    /// one the hook will use. A timestamp from the future is refused, not trusted for ever.
     function setSource(PoolId id, IPriceSource newSource, int24 expectedTick, int24 tolerance)
         external
         onlyOwner
@@ -194,7 +200,9 @@ contract BandHook is IUnlockCallback {
         if (address(newSource) == address(0) || tolerance < 0) revert BadConfig();
 
         (uint256 p, uint256 updatedAt) = newSource.priceX18();
-        if (p == 0 || block.timestamp > updatedAt + cfg.staleAfter) revert BadConfig();
+        if (p == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > cfg.staleAfter) {
+            revert BadConfig();
+        }
 
         int24 newTick = _tickFromPriceX18(p);
         if (_absDiff(newTick, expectedTick) > uint256(int256(tolerance))) {
@@ -209,6 +217,13 @@ contract BandHook is IUnlockCallback {
     /// @dev `feeSlopePpm` is deliberately unchecked: zero means a flat fee at the floor,
     /// which is a supported configuration. Every other field is bounded by what the
     /// PoolManager will accept later, so a pool that configures can also trade.
+    /// @dev The guard must clear the fee cap's dead band, or `recenter` and `fund` refuse for
+    /// as long as the pool rests in it. Past `feeCap` the fee stops rising, so arbitrage toward
+    /// the oracle pays only while the price gap beats the capped fee, and stops there. A fee
+    /// taken on input needs a gap of fee / (1 - fee), and Uniswap charges its protocol fee on
+    /// top of ours, so the worst case adds the protocol maximum. Counting 0.01% per tick
+    /// overstates the gap, the safe direction; `GUARD_MARGIN_TICKS` covers the rounding and an
+    /// oracle that trails the market. A fee at or above 100% has no finite dead band.
     function _validate(PoolConfig calldata cfg) internal pure {
         if (address(cfg.source) == address(0)) revert BadConfig();
         if (cfg.feeFloor > cfg.feeCap || cfg.feeCap > LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
@@ -218,6 +233,10 @@ contract BandHook is IUnlockCallback {
         if (cfg.guardTicks >= cfg.halfBandTicks || cfg.triggerTicks >= cfg.halfBandTicks) {
             revert BadConfig();
         }
+        uint256 fee = uint256(cfg.feeCap) + ProtocolFeeLibrary.MAX_PROTOCOL_FEE;
+        if (fee >= LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
+        uint256 deadBandTicks = fee * 10_000 / (LPFeeLibrary.MAX_LP_FEE - fee);
+        if (uint256(int256(cfg.guardTicks)) <= deadBandTicks + GUARD_MARGIN_TICKS) revert BadConfig();
         if (int256(cfg.halfBandTicks) * MAX_EXTENSION_MULT > TickMath.MAX_TICK) revert BadConfig();
         if (cfg.backstopBps > 10_000) revert BadConfig();
         if (cfg.backstopHalfTicks != 0 && cfg.backstopHalfTicks < cfg.halfBandTicks) revert BadConfig();
@@ -411,10 +430,13 @@ contract BandHook is IUnlockCallback {
     }
 
     /// @dev Reverts unless the transfer really happened. Accepts tokens that return nothing
-    /// as well as tokens that return a bool; treats a `false` return as failure.
+    /// as well as tokens that return a bool; treats a `false` return as failure. A call to an
+    /// address with no code also succeeds and returns nothing, so an empty return is trusted
+    /// only from a contract.
     function _safeTransfer(address token, address to, uint256 amount) internal {
         (bool ok, bytes memory data) = token.call(abi.encodeCall(IERC20Minimal.transfer, (to, amount)));
         if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+        if (data.length == 0 && token.code.length == 0) revert TransferFailed();
     }
 
     /// @dev As `_safeTransfer`, for pulls from the owner.
@@ -422,6 +444,7 @@ contract BandHook is IUnlockCallback {
         (bool ok, bytes memory data) =
             token.call(abi.encodeCall(IERC20Minimal.transferFrom, (from, to, amount)));
         if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+        if (data.length == 0 && token.code.length == 0) revert TransferFailed();
     }
 
     /// @dev Spendable amount mid-unlock: idle balance adjusted by the transient
