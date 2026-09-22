@@ -4,8 +4,10 @@ pragma solidity 0.8.26;
 import {IPriceSource} from "../interfaces/IPriceSource.sol";
 import {IAggregatorV3} from "./ChainlinkSource.sol";
 
-/// @notice Price from the ratio of two same-quote feeds (e.g. HDX/USD ÷ ETH/USD for
-/// a WETH/HDX pool). token0's feed is the numerator. Staleness is the older of the two.
+/// @notice Price from the ratio of two same-quote feeds. The feed that prices pool token0
+/// comes first and is the numerator: for an ETH/HDX pool (token0 = ETH) that is
+/// ETH/USD ÷ HDX/USD, which gives HDX per ETH. Swapping the two inverts the price.
+/// Staleness is the older of the two.
 contract RatioSource is IPriceSource {
     IAggregatorV3 public immutable feedBase; // prices pool token0 in USD
     IAggregatorV3 public immutable feedQuote; // prices pool token1 in USD
