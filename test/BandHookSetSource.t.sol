@@ -184,11 +184,23 @@ contract BandHookSetSourceTest is Test {
         hook.setSource(id, IPriceSource(address(old)), 0, 50);
     }
 
-    /// Bob installs a source whose clock runs 10 minutes ahead: refused with BadConfig.
-    function test_setSource_rejectsASourceFromTheFuture() public {}
+    /// Bob installs a source whose clock runs 10 minutes ahead: refused with BadConfig. The
+    /// old check accepted it, and then every swap read the price as stale.
+    function test_setSource_rejectsASourceFromTheFuture() public {
+        MockPriceSource ahead = new MockPriceSource(1e18);
+        ahead.set(1e18, block.timestamp + 10 minutes);
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setSource(id, IPriceSource(address(ahead)), 0, 50);
+        assertEq(_currentSource(), address(source), "the old source stays");
+    }
 
     /// A source reporting the largest possible timestamp: BadConfig, not an overflow panic.
-    function test_setSource_rejectsAnAbsurdTimestampWithBadConfig() public {}
+    function test_setSource_rejectsAnAbsurdTimestampWithBadConfig() public {
+        MockPriceSource absurd = new MockPriceSource(1e18);
+        absurd.set(1e18, type(uint256).max);
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setSource(id, IPriceSource(address(absurd)), 0, 50);
+    }
 
     /// A replacement that reverts takes the revert with it, rather than being installed.
     function test_setSource_rejectsARevertingSource() public {

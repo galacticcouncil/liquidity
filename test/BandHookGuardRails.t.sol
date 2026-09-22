@@ -215,12 +215,13 @@ contract BandHookGuardRailsTest is Test {
         hook.setParams(id, c);
     }
 
-    /// The real launch configurations, and R4's proposed HDX guard of 300, all still pass.
-    function test_theLaunchValuesAndR4sProposalStillValidate() public {
+    /// The launch configurations as issue #2 set them all pass these rails too: ETH/HOLLAR
+    /// guard 200, and HDX guard 300 (R4's proposal, now adopted).
+    function test_theLaunchValuesValidate() public {
         BandHook.PoolConfig memory eth = _base();
         eth.feeFloor = 800; eth.feeCap = 10000; eth.staleAfter = 100800;
         eth.halfBandTicks = 700; eth.backstopHalfTicks = 11000; eth.backstopBps = 3500;
-        eth.triggerTicks = 350; eth.guardTicks = 150;
+        eth.triggerTicks = 350; eth.guardTicks = 200;
         hook.configure(_freshKey(60), eth);
 
         BandHook.PoolConfig memory hdx = _base();

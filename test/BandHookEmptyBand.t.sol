@@ -19,9 +19,10 @@ import {BandHook} from "../src/BandHook.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 import {MockPriceSource} from "./mocks/MockPriceSource.sol";
 
-/// The hook must never burn a position it cannot replace. Audit finding R1, part one:
-/// once the price has left the band the held token alone yields zero liquidity, and the
-/// burn would move the whole book to idle with no way to put it back.
+/// The hook must never burn a position it cannot replace. Audit finding R1: once the price has
+/// left the band the held token alone makes no two-sided liquidity, and the burn would move the
+/// whole book to idle. Part one refused such a recentre; issue #3 places the held token as a
+/// one-sided limit instead, so every burn is replaced and nothing is stranded.
 contract BandHookEmptyBandTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -37,6 +38,7 @@ contract BandHookEmptyBandTest is Test {
 
     address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     bytes32 constant CORE_SALT = bytes32(0);
+    bytes32 constant LIMIT_SALT = bytes32(uint256(2));
     address bob = makeAddr("bob");
     uint256 constant BASE = 100_000e18;
     uint256 constant DUST = 1e6;
@@ -125,6 +127,10 @@ contract BandHookEmptyBandTest is Test {
         (liq,,) = manager.getPositionInfo(id, HOOK_ADDR, lower, upper, CORE_SALT);
     }
 
+    function heldAsLimit(int24 lower, int24 upper) internal view returns (uint128 liq) {
+        (liq,,) = manager.getPositionInfo(id, HOOK_ADDR, lower, upper, LIMIT_SALT);
+    }
+
     function hookIdle() internal view returns (uint256 i0, uint256 i1) {
         return (t0.balanceOf(HOOK_ADDR), t1.balanceOf(HOOK_ADDR));
     }
@@ -136,53 +142,59 @@ contract BandHookEmptyBandTest is Test {
         setOracleTick(poolTick());
     }
 
-    // ---------- the refusal
+    // ---------- a full exit is placed, not refused
 
-    /// The price rises clear of the band, so the core is all token1 and the re-mint would
-    /// place nothing. The recentre is refused and the position survives untouched.
-    function test_recenterUpward_isRefused_andNothingIsStranded() public {
-        hook.fund(id, BASE, BASE);
-        (int24 lo, int24 hi,, uint128 liqBefore) = hook.core(id);
-
-        _moveBothTo(1200);
-
-        vm.expectRevert(BandHook.EmptyBand.selector);
-        hook.recenter(id);
-
-        (,,, uint128 liqAfter) = hook.core(id);
-        assertEq(liqAfter, liqBefore, "record untouched");
-        assertEq(heldByManager(lo, hi), liqBefore, "the burn was rolled back");
-        (uint256 i0, uint256 i1) = hookIdle();
-        assertEq(i0, 0, "nothing went idle");
-        assertEq(i1, 0, "nothing went idle");
-    }
-
-    /// The mirror direction: the price falls clear of the band, the core is all token0.
-    function test_recenterDownward_isRefused() public {
-        hook.fund(id, BASE, BASE);
-        (int24 lo, int24 hi,, uint128 liqBefore) = hook.core(id);
-
-        _moveBothTo(-1200);
-
-        vm.expectRevert(BandHook.EmptyBand.selector);
-        hook.recenter(id);
-
-        assertEq(heldByManager(lo, hi), liqBefore, "the burn was rolled back");
-    }
-
-    /// The whole point of part one: the position stays in the pool rather than becoming
-    /// idle, so the PoolManager's own view of it is unchanged by the failed attempt.
-    function test_theBurnIsRolledBack_notJustTheRecord() public {
+    /// The price rises clear of the band, so the core is all token1. The recentre places that
+    /// token1 as a bid below the price: the old band is gone, the new one is live, nothing idle.
+    function test_recenterUpward_placesTheHeldToken_andNothingIsStranded() public {
         hook.fund(id, BASE, BASE);
         (int24 lo, int24 hi,,) = hook.core(id);
-        uint128 managerBefore = heldByManager(lo, hi);
 
         _moveBothTo(1200);
-        vm.expectRevert(BandHook.EmptyBand.selector);
         hook.recenter(id);
 
-        assertEq(heldByManager(lo, hi), managerBefore, "the PoolManager still holds it");
-        assertGt(managerBefore, 0, "and it was a real position");
+        (int24 llo, int24 lhi,, uint128 lliq) = hook.limit(id);
+        assertGt(lliq, 0, "the token1 is placed");
+        assertLe(lhi, poolTick(), "as a bid below the price");
+        assertEq(heldByManager(lo, hi), 0, "the old band was burned");
+        assertEq(heldAsLimit(llo, lhi), lliq, "and the PoolManager holds the new one");
+        (uint256 i0, uint256 i1) = hookIdle();
+        assertEq(i0, 0, "no token0 idle");
+        assertLt(i1, 1e15, "only rounding dust of token1 idle");
+    }
+
+    /// The mirror direction: the price falls clear of the band, the core is all token0, and
+    /// the recentre places it as an ask above the price.
+    function test_recenterDownward_placesTheHeldToken() public {
+        hook.fund(id, BASE, BASE);
+        (int24 lo, int24 hi,,) = hook.core(id);
+
+        _moveBothTo(-1200);
+        hook.recenter(id);
+
+        (int24 llo, int24 lhi,, uint128 lliq) = hook.limit(id);
+        assertGt(lliq, 0, "the token0 is placed");
+        assertGt(llo, poolTick(), "as an ask above the price");
+        assertEq(heldByManager(lo, hi), 0, "the old band was burned");
+        assertEq(heldAsLimit(llo, lhi), lliq, "and the PoolManager holds the new one");
+    }
+
+    /// The whole point, restated: after a full-exit recentre the PoolManager holds exactly what
+    /// the records say - nothing at the old band, the core and the limit as recorded - so no
+    /// liquidity exists that no call can reach.
+    function test_theRecordsMatchWhatThePoolManagerHolds() public {
+        hook.fund(id, BASE, BASE);
+        (int24 lo, int24 hi,,) = hook.core(id);
+        assertGt(heldByManager(lo, hi), 0, "a real position to begin with");
+
+        _moveBothTo(1200);
+        hook.recenter(id);
+
+        (int24 clo, int24 chi,, uint128 cliq) = hook.core(id);
+        (int24 llo, int24 lhi,, uint128 lliq) = hook.limit(id);
+        assertEq(heldByManager(lo, hi), 0, "nothing left at the old band");
+        assertEq(heldByManager(clo, chi), cliq, "the core record matches");
+        assertEq(heldAsLimit(llo, lhi), lliq, "the limit record matches");
     }
 
     // ---------- what still works
@@ -212,69 +224,60 @@ contract BandHookEmptyBandTest is Test {
         assertGt(cliq, 0, "recentred normally");
     }
 
-    /// Sweep the distance to find where the refusal starts, rather than assuming it.
-    function test_refusalBoundarySweep() public {
-        console2.log("both pool and oracle moved N ticks, band half-width 1000");
+    /// The distances that used to find where the refusal started. Every one of them now
+    /// recentres, and the hook keeps only rounding dust idle.
+    function test_everyDistanceRecentres_nothingIdle() public {
         int24[6] memory moves = [int24(600), 900, 1000, 1100, 1200, 1500];
         for (uint256 i = 0; i < moves.length; i++) {
             uint256 snap = vm.snapshotState();
             hook.fund(id, BASE, BASE);
             _moveBothTo(moves[i]);
-            try hook.recenter(id) {
-                (,,, uint128 cliq) = hook.core(id);
-                console2.log(
-                    string.concat(
-                        "  +",
-                        vm.toString(int256(moves[i])),
-                        " -> recentred, liquidity ",
-                        vm.toString(uint256(cliq))
-                    )
-                );
-            } catch (bytes memory err) {
-                console2.log(
-                    string.concat("  +", vm.toString(int256(moves[i])), " -> refused ", vm.toString(bytes4(err)))
-                );
-            }
+            hook.recenter(id);
+            (uint256 i0, uint256 i1) = hookIdle();
+            assertLt(i0, 1e15, "only rounding dust of token0 idle");
+            assertLt(i1, 1e15, "only rounding dust of token1 idle");
             vm.revertToState(snap);
         }
     }
 
-    // ---------- the repair path
+    // ---------- after an exit
 
-    /// After a refusal the owner can fund the missing token and the pool recovers.
-    function test_fundingTheMissingTokenRepairsIt() public {
+    /// After a full exit the hook quotes one way. Funding the missing token makes the core
+    /// two-sided again, straddling the price.
+    function test_fundingTheMissingTokenMakesTheCoreTwoSided() public {
         hook.fund(id, BASE, BASE);
         _moveBothTo(1200);
-
-        vm.expectRevert(BandHook.EmptyBand.selector);
         hook.recenter(id);
+        (,,, uint128 before) = hook.core(id);
+        assertEq(before, 0, "one-sided after the exit");
 
-        // the core is all token1, so add token0 and the band can be placed again
         hook.fund(id, BASE, 0);
-        (,,, uint128 cliq) = hook.core(id);
-        assertGt(cliq, 0, "the repair placed a real band");
+        (int24 clo, int24 chi,, uint128 cliq) = hook.core(id);
+        assertGt(cliq, 0, "two-sided again");
+        assertTrue(clo < poolTick() && poolTick() < chi, "the core straddles the price");
     }
 
-    /// A fund that would itself place nothing is refused too, rather than burning the
-    /// live position and stranding everything.
-    function test_fundThatWouldPlaceNothing_isAlsoRefused() public {
+    /// Adding more of the token the hook already holds cannot make a two-sided band, and no
+    /// longer has to: the fund goes through, the old core is burned, and all of it is placed.
+    function test_fundOfTheHeldTokenAfterAnExit_isPlacedInTheLimit() public {
         hook.fund(id, BASE, BASE);
-        (int24 lo, int24 hi,, uint128 liqBefore) = hook.core(id);
+        (int24 lo, int24 hi,,) = hook.core(id);
         _moveBothTo(1200);
 
-        // adding more of the token the hook already holds cannot make a two-sided band
-        vm.expectRevert(BandHook.EmptyBand.selector);
         hook.fund(id, 0, BASE);
 
-        assertEq(heldByManager(lo, hi), liqBefore, "the live position survived");
+        (,,, uint128 cliq) = hook.core(id);
+        (int24 llo, int24 lhi,, uint128 lliq) = hook.limit(id);
+        assertEq(cliq, 0, "still no token0, so no core");
+        assertGt(lliq, 0, "the old core's token1 and the new token1 are in the limit");
+        assertEq(heldByManager(lo, hi), 0, "the old band was burned, not stranded");
+        assertEq(heldAsLimit(llo, lhi), lliq, "and the PoolManager holds the limit");
     }
 
-    /// Withdraw is the escape hatch and must keep working after a refusal.
-    function test_withdrawStillWorksAfterARefusal() public {
+    /// Withdraw is the escape hatch and still returns everything after a full exit, limit included.
+    function test_withdrawAfterAnExit_returnsEverything() public {
         hook.fund(id, BASE, BASE);
         _moveBothTo(1200);
-
-        vm.expectRevert(BandHook.EmptyBand.selector);
         hook.recenter(id);
 
         uint256 before0 = t0.balanceOf(address(this));
@@ -282,6 +285,10 @@ contract BandHookEmptyBandTest is Test {
         hook.withdraw(id);
         assertGt(t0.balanceOf(address(this)) + t1.balanceOf(address(this)), before0 + before1, "funds came back");
         (,,, uint128 cliq) = hook.core(id);
-        assertEq(cliq, 0, "position closed");
+        (,,, uint128 lliq) = hook.limit(id);
+        assertEq(cliq, 0, "core closed");
+        assertEq(lliq, 0, "limit closed");
+        (uint256 i0, uint256 i1) = hookIdle();
+        assertEq(i0 + i1, 0, "nothing left in the hook");
     }
 }

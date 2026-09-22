@@ -185,15 +185,19 @@ contract BandHookExtendLowerClampsTest is Test {
         }
     }
 
-    /// The surplus that will not fit stays idle, and withdraw hands all of it back.
-    function test_fund_surplusStaysIdleAndComesBack() public {
+    /// The surplus the widest band cannot hold goes into the limit instead of sitting idle
+    /// (issue #3), and withdraw still hands all of it back.
+    function test_fund_surplusGoesToTheLimitAndComesBack() public {
         uint256 before0 = t0.balanceOf(address(this));
         uint256 before1 = t1.balanceOf(address(this));
 
         hook.fund(id, BASE, 6 * BASE);
-        (uint256 i0, uint256 i1) = hookIdle();
-        assertGt(i1, 0, "surplus token1 is idle, not lost");
-        console2.log(string.concat("  idle token0 ", vm.toString(i0), "  idle token1 ", vm.toString(i1)));
+        (int24 llo, int24 lhi,, uint128 lliq) = hook.limit(id);
+        assertGt(lliq, 0, "the surplus token1 is placed");
+        assertLe(lhi, poolTick(), "as a bid below the price");
+        assertEq(heldByManager(llo, lhi, bytes32(uint256(2))), lliq, "and the PoolManager holds it");
+        (, uint256 i1) = hookIdle();
+        assertLt(i1, 1e15, "only rounding dust idle");
 
         hook.withdraw(id);
         assertApproxEqAbs(t0.balanceOf(address(this)), before0, 1e15, "token0 returned");
@@ -203,7 +207,7 @@ contract BandHookExtendLowerClampsTest is Test {
         assertEq(a1, 0, "nothing idle after withdraw");
     }
 
-    /// Both skews behave the same way now: widen to the cap, leave the rest idle.
+    /// Both skews behave the same way now: widen to the cap, and the rest goes to the limit.
     function test_fund_bothDirectionsBehaveTheSame() public {
         uint256 snap = vm.snapshotState();
 
@@ -280,12 +284,12 @@ contract BandHookExtendLowerClampsTest is Test {
         assertGt(cliq, 0, "the mirror direction still places liquidity");
     }
 
-    /// Audit finding R1. With exactly zero of the scarce token the re-mint would place
-    /// nothing, so the recentre is now refused rather than moving the whole position to
-    /// idle. Placing a one-sided band instead is part two, still a design call for the team.
-    function test_recenter_withoutDust_isRefusedRatherThanStranding() public {
+    /// Audit finding R1. With exactly zero of the scarce token the core can place nothing. Part
+    /// one refused the recentre; part two (issue #3) places the held token as a one-sided limit,
+    /// so the recentre goes through and nothing is stranded.
+    function test_recenter_withoutDust_placesTheHeldTokenAsALimit() public {
         hook.fund(id, BASE, BASE);
-        (int24 lo, int24 hi,, uint128 liqBefore) = hook.core(id);
+        (int24 lo, int24 hi,,) = hook.core(id);
 
         pushPoolToTick(1200);
         setOracleTick(poolTick());
@@ -293,11 +297,14 @@ contract BandHookExtendLowerClampsTest is Test {
         (uint256 i0,) = hookIdle();
         assertEq(i0, 0, "no dust of the scarce token");
 
-        vm.expectRevert(BandHook.EmptyBand.selector);
         hook.recenter(id);
 
-        (,,, uint128 liqAfter) = hook.core(id);
-        assertEq(liqAfter, liqBefore, "the record is untouched");
-        assertEq(heldByManager(lo, hi, bytes32(0)), liqBefore, "and the position is still live");
+        (,,, uint128 cliq) = hook.core(id);
+        (int24 llo, int24 lhi,, uint128 lliq) = hook.limit(id);
+        assertEq(cliq, 0, "no token0, so no two-sided core");
+        assertGt(lliq, 0, "the token1 went into the limit");
+        assertLe(lhi, poolTick(), "as a bid below the price");
+        assertEq(heldByManager(lo, hi, bytes32(0)), 0, "the old core was burned");
+        assertEq(heldByManager(llo, lhi, bytes32(uint256(2))), lliq, "and the PoolManager holds the limit");
     }
 }

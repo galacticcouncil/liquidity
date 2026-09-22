@@ -189,5 +189,18 @@ contract BandHookSafeTransferTest is Test {
     // ---------- an address with no code (issue #2)
 
     /// Bob funds a pool whose token address holds no contract: TransferFailed, nothing recorded.
-    function test_fund_revertsWhenATokenHasNoCode() public {}
+    /// The old helpers treated the empty return as success and failed later, with no reason.
+    function test_fund_revertsWhenATokenHasNoCode() public {
+        MockERC20 good = new MockERC20("GOOD", "GOOD", 18);
+        address ghost = makeAddr("no contract here");
+        (, PoolId id) = _makePool(ghost, address(good));
+        uint256 before = _balance(address(good), address(this));
+
+        vm.expectRevert(BandHook.TransferFailed.selector);
+        hook.fund(id, FUND, FUND);
+
+        assertEq(_balance(address(good), address(this)), before, "Bob keeps the real token");
+        (,,, uint128 cliq) = hook.core(id);
+        assertEq(cliq, 0, "no core recorded");
+    }
 }

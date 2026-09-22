@@ -30,8 +30,9 @@ interface IERC20Minimal {
 
 /// @notice Oracle-guarded band market maker for Uniswap v4.
 ///
-/// The hook owns two tick positions per pool: a core band around a reference price
-/// and a wide static backstop. Liquidity placement never sets the pool price; the
+/// The hook owns three tick positions per pool: a core band around a reference price,
+/// a wide static backstop, and a one-sided limit next to the price holding whatever the
+/// core cannot. Liquidity placement never sets the pool price; the
 /// oracle is used only to (a) drive a dynamic fee that rises when the pool price
 /// diverges from the reference, (b) gate re-centering so a manipulated pool price
 /// cannot drag the band, and (c) pick the new center. Anyone can call recenter();
@@ -87,11 +88,13 @@ contract BandHook is IUnlockCallback {
     mapping(PoolId => PoolKey) internal keys;
     mapping(PoolId => Pos) public core;
     mapping(PoolId => Pos) public backstop;
+    mapping(PoolId => Pos) public limit;
 
     // ln(1.0001) * 1e18
     int256 internal constant LN_TICK = 99995000333308;
     bytes32 internal constant CORE_SALT = bytes32(0);
     bytes32 internal constant BACKSTOP_SALT = bytes32(uint256(1));
+    bytes32 internal constant LIMIT_SALT = bytes32(uint256(2));
     // hard cap on asymmetric extension of the core band, in half-band multiples
     int24 internal constant MAX_EXTENSION_MULT = 4;
     // the permission bits this hook's address must carry: afterInitialize | beforeSwap
@@ -310,6 +313,9 @@ contract BandHook is IUnlockCallback {
     /// @notice Permissionless. Executes only when the oracle is fresh, the drift from
     /// the current core center exceeds the trigger, and the pool price agrees with
     /// the oracle within the guard.
+    /// @dev With an empty core, the whole book is in the limit and there is no centre to drift
+    /// from, so the trigger does not apply: the limit can follow the price and turn two-sided
+    /// again as soon as the guard passes.
     function recenter(PoolId id) external {
         PoolConfig storage cfg = config[id];
         if (!cfg.enabled) revert NotEnabled();
@@ -337,14 +343,14 @@ contract BandHook is IUnlockCallback {
 
     // ---------- unlock callback
 
-    /// @dev The hook keeps one core record per pool. FUND and RECENTER are handled as separate
-    /// branches, and each burns any live core before the shared mint. Minting over a live core
-    /// would leave liquidity no call can reach: the record holds the only copy of its bounds,
-    /// and no function accepts arbitrary ones.
-    /// @dev The burn is only safe because an empty re-mint reverts. `getLiquidityForAmounts`
-    /// takes the smaller side, so once the price has left the band the held token alone yields
-    /// zero liquidity; without the check the burn would move the whole position to idle and
-    /// nothing could put it back.
+    /// @dev The hook keeps one core record and one limit record per pool. FUND and RECENTER are
+    /// handled as separate branches, and each burns any live core before the shared mint; both
+    /// burn the live limit. Minting over a live position would leave liquidity no call can reach:
+    /// the record holds the only copy of its bounds, and no function accepts arbitrary ones.
+    /// @dev The burns never move the book to idle, because what the two-sided core cannot hold
+    /// goes into the limit: once the price has left the band the core is empty and the limit
+    /// holds everything. The re-mint reverts only when neither can place anything, which rolls
+    /// the burns back.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(manager)) revert NotManager();
         (Action action, PoolId id) = abi.decode(data, (Action, PoolId));
@@ -354,14 +360,15 @@ contract BandHook is IUnlockCallback {
         if (action == Action.WITHDRAW) {
             _burn(key, core[id], CORE_SALT);
             _burn(key, backstop[id], BACKSTOP_SALT);
+            _burn(key, limit[id], LIMIT_SALT);
             delete core[id];
             delete backstop[id];
+            delete limit[id];
         } else {
             (int24 center, bool fresh) = _oracleTick(cfg);
             if (!fresh) revert StaleOracle();
             (uint160 sqrtP, int24 poolTick,,) = manager.getSlot0(id);
             if (_absDiff(poolTick, center) > uint256(int256(cfg.guardTicks))) revert GuardTripped();
-            if (_wouldPlaceNothing(key, poolTick, core[id])) revert EmptyBand();
 
             if (action == Action.FUND && cfg.backstopHalfTicks != 0 && backstop[id].liquidity == 0) {
                 // carve out the backstop share first, wide and symmetric
@@ -379,12 +386,16 @@ contract BandHook is IUnlockCallback {
                 _burn(key, core[id], CORE_SALT);
                 delete core[id];
             }
+            _burn(key, limit[id], LIMIT_SALT);
+            delete limit[id];
             (uint256 a0, uint256 a1) = (_available(key.currency0), _available(key.currency1));
             Pos memory placed = _mintFitted(
                 key, sqrtP, center, cfg.halfBandTicks, cfg.halfBandTicks * MAX_EXTENSION_MULT, a0, a1, CORE_SALT
             );
-            if (placed.liquidity == 0) revert EmptyBand();
+            Pos memory placedLimit = _mintLimit(key, poolTick, center, cfg.halfBandTicks);
+            if (placed.liquidity == 0 && placedLimit.liquidity == 0) revert EmptyBand();
             core[id] = placed;
+            limit[id] = placedLimit;
             emit Recentered(id, center, placed.lower, placed.upper, placed.liquidity);
         }
         _settleAll(key);
@@ -592,22 +603,59 @@ contract BandHook is IUnlockCallback {
         if (hi > capHi) hi = capHi;
     }
 
-    /// @dev Would the core re-mint place nothing? Asked before the burn, so a refusal does
-    /// not pay for one. Both `fund` and `recenter` keep the pool price within `guardTicks` of
-    /// the band centre, so the price is inside the band and the liquidity is the smaller of
-    /// the two sides; an empty side makes it zero. The cheap test is outermost: only when the
-    /// price has left the old band does one side hold nothing, and only then is a balance read
-    /// worth paying for. Conservative - it answers true only when certain, and the check after
-    /// `_mintFitted` catches the rest.
-    function _wouldPlaceNothing(PoolKey memory key, int24 t, Pos memory old)
+    /// @dev Place what the core could not hold as a one-sided range half a band wide: token1
+    /// below the price as a bid, or token0 above it as an ask, whichever gives more liquidity.
+    /// For two ranges of equal width touching the price, more liquidity is more value. The inner
+    /// edge sits on the safer side of pool and oracle - a bid tops out at the lower of the two,
+    /// an ask starts above the higher - so the limit never offers a better price than the
+    /// oracle, and pushing the pool inside the guard cannot drag it. Empty when neither side
+    /// places anything.
+    function _mintLimit(PoolKey memory key, int24 poolTick, int24 oracleTick, int24 width)
+        internal
+        returns (Pos memory p)
+    {
+        (int24 lo, int24 hi, uint128 liq) = _bid(key, poolTick < oracleTick ? poolTick : oracleTick, width);
+        (int24 askLo, int24 askHi, uint128 askLiq) = _ask(key, poolTick > oracleTick ? poolTick : oracleTick, width);
+        if (askLiq > liq) (lo, hi, liq) = (askLo, askHi, askLiq);
+        if (liq == 0) return p;
+        manager.modifyLiquidity(
+            key,
+            ModifyLiquidityParams({tickLower: lo, tickUpper: hi, liquidityDelta: int256(uint256(liq)), salt: LIMIT_SALT}),
+            ""
+        );
+        p = Pos({lower: lo, upper: hi, center: oracleTick, liquidity: liq});
+    }
+
+    /// @dev A bid of token1 `width` ticks wide whose top is at or below `top`, and the liquidity
+    /// the hook's token1 gives it. Wholly below the price, so it needs no token0.
+    function _bid(PoolKey memory key, int24 top, int24 width)
         internal
         view
-        returns (bool)
+        returns (int24 lo, int24 hi, uint128 liq)
     {
-        if (old.liquidity == 0) return false;
-        if (t >= old.upper) return _available(key.currency0) == 0;
-        if (t <= old.lower) return _available(key.currency1) == 0;
-        return false;
+        hi = _floorTick(top, key.tickSpacing);
+        lo = _floorTick(hi - width, key.tickSpacing);
+        if (lo < TickMath.minUsableTick(key.tickSpacing)) lo = TickMath.minUsableTick(key.tickSpacing);
+        if (lo >= hi) return (lo, hi, 0);
+        liq = LiquidityAmounts.getLiquidityForAmount1(
+            TickMath.getSqrtPriceAtTick(lo), TickMath.getSqrtPriceAtTick(hi), _available(key.currency1)
+        );
+    }
+
+    /// @dev Mirror of `_bid`: an ask of token0 `width` ticks wide starting one spacing above
+    /// `bottom`. Wholly above the price, so it needs no token1.
+    function _ask(PoolKey memory key, int24 bottom, int24 width)
+        internal
+        view
+        returns (int24 lo, int24 hi, uint128 liq)
+    {
+        lo = _floorTick(bottom, key.tickSpacing) + key.tickSpacing;
+        hi = _ceilTick(lo + width, key.tickSpacing);
+        if (hi > TickMath.maxUsableTick(key.tickSpacing)) hi = TickMath.maxUsableTick(key.tickSpacing);
+        if (lo >= hi) return (lo, hi, 0);
+        liq = LiquidityAmounts.getLiquidityForAmount0(
+            TickMath.getSqrtPriceAtTick(lo), TickMath.getSqrtPriceAtTick(hi), _available(key.currency0)
+        );
     }
 
     function _settleAll(PoolKey memory key) internal {

@@ -1,9 +1,9 @@
 # Robinhood Chain v4 pools — BandHook launch kit
 
 Uniswap v4 dynamic-fee pools on Robinhood Chain (chain id 4663), market-made by
-`BandHook`: hook-owned core band + wide backstop, oracle-guarded permissionless
-recentering, divergence-driven dynamic fee. Pools: **ETH/HOLLAR, HDX/HOLLAR,
-ETH/HDX** (native ETH).
+`BandHook`: hook-owned core band + one-sided limit for the leftover + wide
+backstop, oracle-guarded permissionless recentering, divergence-driven dynamic
+fee. Pools: **ETH/HOLLAR, HDX/HOLLAR, ETH/HDX** (native ETH).
 
 Design + evidence: garden note `wiki/note-robinhood-pools-proposal`.
 Audit + fixes: PR #1 (merged 2026-09-18).
@@ -61,7 +61,7 @@ means and what to do:
 |---|---|---|
 | `StaleOracle` | price source older than `staleAfter` (or unusable) | fix the feed/pipeline; nothing moved. Swaps continue at the floor fee |
 | `GuardTripped` | pool price > `guardTicks` from the oracle | wait for arbitrage to align the pool, or anchor (empty pool). Never force capital against an unverified price |
-| `EmptyBand` | the re-mint would place no liquidity (single-token inventory after a full band exit) | position is safe where it is; recenter becomes possible when price re-enters, or owner withdraws + re-funds two-sided |
+| `EmptyBand` | nothing at all could be placed: the hook holds no tokens for this pool. A full band exit no longer causes it; the held token goes into the one-sided limit | fund the pool; nothing moved |
 
 `fund(id, 0, 0)` is the owner's **forced recenter**: it pulls nothing, skips
 the drift trigger, but keeps the freshness and guard checks. Useful after
@@ -72,7 +72,7 @@ replacement against an expected tick, never calls the old source.
 
 ## Post-launch monitoring
 
-`recenter(poolId)` is permissionless (~350k gas) and safe to call blindly —
+`recenter(poolId)` is permissionless (~490k gas on a Robinhood fork) and safe to call blindly —
 the guards decide. Watchdog principle: **alert on work that was due, not on
 quiet inactivity** —
 
