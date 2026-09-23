@@ -78,6 +78,39 @@ the drift trigger, but keeps the freshness and guard checks. Useful after
 `setSource` is the recovery path for a dead feed: owner-only, validates the
 replacement against an expected tick, never calls the old source.
 
+## In-swap recenter (per pool, off by default)
+
+A pool with `autoRecenter` on is also recentered at the end of the swap that
+makes it due (the hook's `afterSwap`), so no keeper is needed in the usual
+case. The trader whose swap triggers it pays the extra gas: about 390–420k,
+measured through the Universal Router on a fork of this chain, roughly $0.10
+at a typical base fee. Every other swap pays about 12k for the checks.
+
+- **It never fails a swap.** It is skipped whenever a gate says no: the same
+  gates as `recenter()`, plus a non-empty core, no currency part-way through
+  payment in the PoolManager, and at least 900k gas left (600k for the
+  attempt, 300k kept for the rest of the trader's transaction). An attempt
+  that does run is a call the hook makes to itself: if anything inside fails,
+  all of it is undone and the hook emits `RecenterSkipped(poolId, reason)`
+  (the error's first four bytes, or zero when nothing came back, usually
+  because it ran out of gas).
+- **An empty core is the keeper's job.** After a full band exit the recenter
+  leaves no core and the limit holding everything; swaps then skip, and
+  `recenter()`, which needs no trigger in that state, places it again.
+- **The one exception:** a route with more than ~450k gas of work after this
+  pool, whose gas was estimated before the recenter became due, and which
+  carries less spare than the recenter costs (~420–470k), can run out of gas.
+  2 to 5 of 1,512 real v4 swaps on this chain had that shape.
+- **How often it fires:** only swaps sent with that much gas to spare can pay
+  for it: about a quarter of real v4 swaps here, mostly bots and aggregators,
+  and about 5% of wallet trades through the Universal Router.
+- **Switch:** `setAutoRecenter(poolId, on)`, owner only. `setParams` never
+  changes it. `01_SetupPool` reads `AUTO_RECENTER` (default `false`).
+- **Fallback:** the manual `recenter()` is unchanged. Keep a keeper that calls
+  it when due; as a backup to the in-swap path, a one-hour delay is enough.
+- **Address:** the hook carries `afterInitialize | beforeSwap | afterSwap`
+  (`0x10C0`); `00_DeployBandHook` mines for it and the constructor checks it.
+
 ## Post-launch monitoring
 
 `recenter(poolId)` is permissionless (~490k gas on a Robinhood fork) and safe to call blindly —
@@ -88,7 +121,10 @@ quiet inactivity** —
 - feed `updatedAt` older than its heartbeat + margin,
 - idle (unplaced) inventory above X% of position value,
 - pool price pinned at `guardTicks` distance from the oracle for hours
-  (fee dead-band or manipulation — investigate either way).
+  (fee dead-band or manipulation — investigate either way),
+- any `RecenterSkipped`: one is noise; repeats mean the in-swap recenter cannot
+  complete and every due swap pays for a failed attempt — switch that pool's
+  `autoRecenter` off and investigate.
 
 **Not audited externally.** Internal audit in PR #1; the hook custodies the LP
 capital — cap the pilot size until an external audit lands.

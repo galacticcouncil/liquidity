@@ -55,7 +55,7 @@ contract FundPool is PoolScript {
 
     /// @dev Read-only gate, with the hook's own source, staleness and guard.
     function _requireOnTheOracle(BandHook hook, PoolId id) internal view {
-        (IPriceSource source,,,, uint32 staleAfter,,,,, int24 guard,) = hook.config(id);
+        (IPriceSource source,,,, uint32 staleAfter,,,,, int24 guard,,) = hook.config(id);
         require(address(source) != address(0), "pool not configured: run 01_SetupPool first");
         (, int24 oracleTick) = _oracle(source, staleAfter);
         (, int24 poolTick,,) = MANAGER.getSlot0(id);

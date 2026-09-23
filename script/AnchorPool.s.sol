@@ -35,7 +35,7 @@ contract AnchorPool is PoolScript {
         BandHook hook = BandHook(payable(vm.envAddress("HOOK")));
         PoolKey memory key = _poolKey(address(hook));
         PoolId id = key.toId();
-        (IPriceSource source,,,, uint32 staleAfter,,,,, int24 guard,) = hook.config(id);
+        (IPriceSource source,,,, uint32 staleAfter,,,,, int24 guard,,) = hook.config(id);
         require(address(source) != address(0), "pool not configured: run 01_SetupPool first");
         (uint160 target, int24 oracleTick) = _oracle(source, staleAfter);
         (uint160 current, int24 poolTick,,) = MANAGER.getSlot0(id);

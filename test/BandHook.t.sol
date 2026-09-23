@@ -35,7 +35,7 @@ contract BandHookTest is Test {
     PoolId id;
 
     // AFTER_INITIALIZE (1<<12) | BEFORE_SWAP (1<<7)
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     uint24 constant FLOOR = 3000; // 0.3%
     uint24 constant CAP = 20000; // 2%
 
@@ -85,7 +85,8 @@ contract BandHookTest is Test {
             backstopBps: 3000,
             triggerTicks: 500, // ~5%
             guardTicks: 300, // ~3%
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 

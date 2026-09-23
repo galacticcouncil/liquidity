@@ -33,7 +33,7 @@ contract SetupPool is PoolScript {
         PoolKey memory key = _poolKey(address(hook));
         PoolId id = key.toId();
 
-        (IPriceSource source,,,,,,,,,,) = hook.config(id);
+        (IPriceSource source,,,,,,,,,,,) = hook.config(id);
         if (address(source) == address(0)) {
             vm.startBroadcast(pk);
             source = _deploySource();
@@ -110,7 +110,8 @@ contract SetupPool is PoolScript {
             backstopBps: uint16(vm.envUint("BACKSTOP_BPS")),
             triggerTicks: int24(int256(vm.envInt("TRIGGER_TICKS"))),
             guardTicks: int24(int256(vm.envInt("GUARD_TICKS"))),
-            enabled: true
+            enabled: true,
+            autoRecenter: vm.envOr("AUTO_RECENTER", false)
         });
     }
 

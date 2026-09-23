@@ -27,7 +27,7 @@ contract BandHookForkTest is Test {
     IPoolManager constant MANAGER = IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951);
     IAggregatorV3 constant ETH_USD = IAggregatorV3(0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9);
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
 
     BandHook hook;
     ChainlinkSource source;
@@ -73,7 +73,8 @@ contract BandHookForkTest is Test {
                 backstopBps: 3500,
                 triggerTicks: 350, // ~3.5%
                 guardTicks: 200,
-                enabled: true
+                enabled: true,
+                autoRecenter: false
             })
         );
 

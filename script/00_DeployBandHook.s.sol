@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 // Deploys one pool's BandHook via the canonical CREATE2 proxy, at a salt-mined address whose
-// low bits encode AFTER_INITIALIZE | BEFORE_SWAP (0x1080). Each pool gets its own hook: run
-// this once per pool. Every run mines the next free salt, so three runs give three hooks.
+// low bits encode AFTER_INITIALIZE | BEFORE_SWAP | AFTER_SWAP (0x10C0). Each pool gets its own
+// hook: run this once per pool. Every run mines the next free salt, so three runs give three hooks.
 // Put the printed address in that pool's settings file as HOOK.
 //
 //   forge script script/00_DeployBandHook.s.sol --rpc-url robinhood --broadcast
@@ -23,7 +23,7 @@ contract DeployBandHook is Script {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
 
-        uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG);
+        uint160 flags = uint160(Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
         bytes memory creationCode = abi.encodePacked(type(BandHook).creationCode, abi.encode(MANAGER, deployer));
         (address expected, bytes32 salt) = HookMiner.find(flags, creationCode);
         console2.log("mined hook address:", expected);

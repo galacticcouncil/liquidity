@@ -34,7 +34,7 @@ contract BandHookExtendLowerClampsTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     address bob = makeAddr("bob");
 
     uint256 constant BASE = 100_000e18;
@@ -92,7 +92,8 @@ contract BandHookExtendLowerClampsTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 

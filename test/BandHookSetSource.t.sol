@@ -33,7 +33,7 @@ contract BandHookSetSourceTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     address carol = makeAddr("carol");
     uint256 constant FUND = 100_000e18;
     uint24 constant FLOOR = 3000;
@@ -81,7 +81,8 @@ contract BandHookSetSourceTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -108,7 +109,7 @@ contract BandHookSetSourceTest is Test {
     }
 
     function _currentSource() internal view returns (address s) {
-        (IPriceSource src,,,,,,,,,,) = hook.config(id);
+        (IPriceSource src,,,,,,,,,,,) = hook.config(id);
         return address(src);
     }
 

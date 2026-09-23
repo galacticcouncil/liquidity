@@ -40,7 +40,7 @@ contract BandHookGuardRailsTest is Test {
     PoolKey nativeKey;
     PoolId nativeId;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     uint256 constant FUND = 100_000e18;
     int24 constant HALF = 1000;
 
@@ -105,7 +105,8 @@ contract BandHookGuardRailsTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -144,7 +145,7 @@ contract BandHookGuardRailsTest is Test {
 
     /// And the mined address is accepted, which the whole suite depends on.
     function test_R9_theMinedAddressIsAccepted() public view {
-        assertEq(uint160(HOOK_ADDR) & 0x3FFF, 0x1080, "afterInitialize | beforeSwap");
+        assertEq(uint160(HOOK_ADDR) & 0x3FFF, 0x10C0, "afterInitialize | beforeSwap | afterSwap");
         assertEq(address(hook), HOOK_ADDR, "and the hook lives there");
     }
 

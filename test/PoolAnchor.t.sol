@@ -38,7 +38,7 @@ contract PoolAnchorTest is Test {
     PoolId id;
     PoolKey nativeKey;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     address stranger = makeAddr("stranger");
     uint128 constant TINY = 1e12;
     uint256 constant DUST = 1e12; // what an anchor through an empty path may cost, per token
@@ -97,7 +97,8 @@ contract PoolAnchorTest is Test {
             backstopBps: 0,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 

@@ -32,7 +32,7 @@ contract BandHookValidateConfigTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     int24 constant MAX_TICK = TickMath.MAX_TICK; // 887272
     int24 constant MAX_HALF_BAND = MAX_TICK / 4; // halfBandTicks * MAX_EXTENSION_MULT must fit
 
@@ -76,7 +76,8 @@ contract BandHookValidateConfigTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -274,7 +275,7 @@ contract BandHookValidateConfigTest is Test {
         _expectRejected(cfg);
         cfg.guardTicks = 265;
         hook.configure(key, cfg);
-        (,,,,,,,,, int24 stored,) = hook.config(id);
+        (,,,,,,,,, int24 stored,,) = hook.config(id);
         assertEq(stored, 265, "the first accepted guard at a 2% cap");
 
         PoolKey memory k2 = key;
@@ -285,7 +286,7 @@ contract BandHookValidateConfigTest is Test {
         hook.configure(k2, cfg);
         cfg.guardTicks = 162;
         hook.configure(k2, cfg);
-        (,,,,,,,,, stored,) = hook.config(k2.toId());
+        (,,,,,,,,, stored,,) = hook.config(k2.toId());
         assertEq(stored, 162, "the first accepted guard at a 1% cap");
     }
 
@@ -296,7 +297,7 @@ contract BandHookValidateConfigTest is Test {
         tighter.guardTicks = 200;
         vm.expectRevert(BandHook.BadConfig.selector);
         hook.setParams(id, tighter);
-        (,,,,,,,,, int24 guard,) = hook.config(id);
+        (,,,,,,,,, int24 guard,,) = hook.config(id);
         assertEq(guard, 300, "the live guard is unchanged");
     }
 }

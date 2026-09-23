@@ -38,7 +38,7 @@ contract BandHookFundGuardTest is Test {
     PoolKey nativeKey;
     PoolId nativeId;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     address mallory = makeAddr("mallory");
     uint256 constant FUND = 100_000e18;
     int24 constant GUARD = 100;
@@ -112,7 +112,8 @@ contract BandHookFundGuardTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: guardTicks,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 
