@@ -637,24 +637,27 @@ contract BandHook is IUnlockCallback {
         pure
         returns (int24 lo, int24 hi, uint128 liq)
     {
-        lo = _floorTick(s.center - s.half, s.spacing);
-        hi = _ceilTick(s.center + s.half, s.spacing);
+        (lo, hi) = _bandEdges(s.center, s.half, s.spacing);
         uint160 sqrtLo = TickMath.getSqrtPriceAtTick(lo);
         uint160 sqrtHi = TickMath.getSqrtPriceAtTick(hi);
         if (sqrtP > sqrtLo && sqrtP < sqrtHi) {
             (lo, hi) = _fitBounds(sqrtP, lo, hi, s, a0, a1);
-            if (lo >= hi) {
-                lo = _floorTick(s.center - s.half, s.spacing);
-                hi = _ceilTick(s.center + s.half, s.spacing);
-            }
+            if (lo >= hi) (lo, hi) = _bandEdges(s.center, s.half, s.spacing);
             sqrtLo = TickMath.getSqrtPriceAtTick(lo);
             sqrtHi = TickMath.getSqrtPriceAtTick(hi);
         }
-        int24 minT = TickMath.minUsableTick(s.spacing);
-        int24 maxT = TickMath.maxUsableTick(s.spacing);
+        liq = LiquidityAmounts.getLiquidityForAmounts(sqrtP, sqrtLo, sqrtHi, a0, a1);
+    }
+
+    /// @dev `center` +- `half` on the spacing grid, cut at the pool's usable range before any
+    /// price is taken from it; cutting only narrows the band, so it never needs more tokens.
+    function _bandEdges(int24 center, int24 half, int24 spacing) internal pure returns (int24 lo, int24 hi) {
+        lo = _floorTick(center - half, spacing);
+        hi = _ceilTick(center + half, spacing);
+        int24 minT = TickMath.minUsableTick(spacing);
+        int24 maxT = TickMath.maxUsableTick(spacing);
         if (lo < minT) lo = minT;
         if (hi > maxT) hi = maxT;
-        liq = LiquidityAmounts.getLiquidityForAmounts(sqrtP, sqrtLo, sqrtHi, a0, a1);
     }
 
     /// @dev extend one side of [lo,hi] so the surplus token is absorbed at the
@@ -695,6 +698,7 @@ contract BandHook is IUnlockCallback {
         lo = _ceilTick(loNew, spacing); // ceil: never require more token1 than held
         int24 floorLo = _ceilTick(center - maxHalf, spacing);
         if (lo < floorLo) lo = floorLo;
+        if (lo < TickMath.minUsableTick(spacing)) lo = TickMath.minUsableTick(spacing);
     }
 
     function _extendUpper(uint160 sqrtP, uint128 liq, uint256 a0, int24 center, int24 maxHalf, int24 spacing)
@@ -717,6 +721,7 @@ contract BandHook is IUnlockCallback {
         hi = _floorTick(hiNew, spacing); // floor: never require more token0 than held
         int24 capHi = _floorTick(center + maxHalf, spacing);
         if (hi > capHi) hi = capHi;
+        if (hi > TickMath.maxUsableTick(spacing)) hi = TickMath.maxUsableTick(spacing);
     }
 
     /// @dev Place what the core could not hold as a one-sided range half a band wide: token1
