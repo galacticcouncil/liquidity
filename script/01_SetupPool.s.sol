@@ -13,8 +13,10 @@ pragma solidity 0.8.26;
 // says so, and the pool must go through AnchorPool before 02_Fund.
 
 import {console2} from "forge-std/Script.sol";
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {Currency} from "v4-core/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {BandHook} from "../src/BandHook.sol";
@@ -36,7 +38,7 @@ contract SetupPool is PoolScript {
         (IPriceSource source,,,,,,,,,,,) = hook.config(id);
         if (address(source) == address(0)) {
             vm.startBroadcast(pk);
-            source = _deploySource();
+            source = _deploySource(key);
             vm.stopBroadcast();
             _checkExpectedTick(source);
             vm.startBroadcast(pk);
@@ -62,10 +64,10 @@ contract SetupPool is PoolScript {
 
     /// @dev SOURCE=ratio divides FEED0_USD (prices token0) by FEED1_USD (prices token1).
     /// SOURCE=single reads FEED, which prices pool token FEED_PRICES_TOKEN (0 or 1) in a
-    /// USD-stable other token. Decimals are always the pool tokens' own, TOKEN0/TOKEN1_DECIMALS.
-    function _deploySource() internal returns (IPriceSource) {
-        uint8 dec0 = uint8(vm.envUint("TOKEN0_DECIMALS"));
-        uint8 dec1 = uint8(vm.envUint("TOKEN1_DECIMALS"));
+    /// USD-stable other token. Decimals are read from the pool's tokens, never typed in.
+    function _deploySource(PoolKey memory key) internal returns (IPriceSource) {
+        uint8 dec0 = _tokenDecimals(Currency.unwrap(key.currency0));
+        uint8 dec1 = _tokenDecimals(Currency.unwrap(key.currency1));
         bytes32 kind = keccak256(bytes(vm.envString("SOURCE")));
         if (kind == keccak256("ratio")) {
             IAggregatorV3 feed0 = IAggregatorV3(vm.envAddress("FEED0_USD"));
@@ -78,6 +80,12 @@ contract SetupPool is PoolScript {
         bool invert = pricesToken == 1;
         IAggregatorV3 feed = IAggregatorV3(vm.envAddress("FEED"));
         return IPriceSource(address(new ChainlinkSource(feed, invert, invert ? dec1 : dec0, invert ? dec0 : dec1)));
+    }
+
+    /// @dev A pool currency's decimals: 18 for native ETH (address 0), otherwise the token's own.
+    /// A token without decimals() or an address with no code reverts, which stops the script.
+    function _tokenDecimals(address token) internal view returns (uint8) {
+        return token == address(0) ? 18 : IERC20(token).decimals();
     }
 
     /// @dev The one mistake nothing else catches: a source the wrong way up or with the wrong

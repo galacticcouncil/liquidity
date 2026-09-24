@@ -96,19 +96,31 @@ contract BandHookScriptsForkTest is Test {
         }
     }
 
-    /// ETH/HOLLAR: one Chainlink feed, initialized at the oracle price and funded.
+    /// ETH/HOLLAR: one Chainlink feed. An expected tick worked out as if HOLLAR had 8 decimals
+    /// (as Wormhole wraps) is refused before anything is configured, because the script reads the
+    /// token's real 18; the right one initializes the pool at the oracle price, and it is funded.
     function _setUpAndFundEthHollar() internal {
         ethHollarKey = _key(ethHollar, address(0), address(hollar), 10);
-        _poolEnv(ethHollar, address(0), address(hollar), 10, 18, 18);
+        _poolEnv(ethHollar, address(0), address(hollar), 10);
         _setS("SOURCE", "single");
         _setA("FEED", address(ETH_USD));
         _setU("FEED_PRICES_TOKEN", 0);
-        _setI("EXPECTED_TICK", _tickOf(ethAnswer, 1e8)); // raw HOLLAR per raw ETH
         _params(800, 10000, 100800, 700, 11000, 350, 200);
         _setU("FUND_AMOUNT0", 10 ether);
         _setU("FUND_AMOUNT1", 10 * ethAnswer * 1e10);
 
-        new SetupPool().run();
+        _setI("EXPECTED_TICK", _tickOf(ethAnswer, 1e18)); // raw HOLLAR per raw ETH at 8 decimals
+        SetupPool setup = new SetupPool();
+        try setup.run() {
+            assertTrue(false, "an expected tick from the wrong decimals should have been refused");
+        } catch Error(string memory reason) {
+            assertEq(_prefix(reason, 17), "source reads tick", "refused by the expected-tick check");
+        }
+        (IPriceSource none,,,,,,,,,,,) = ethHollar.config(ethHollarKey.toId());
+        assertEq(address(none), address(0), "nothing configured");
+
+        _setI("EXPECTED_TICK", _tickOf(ethAnswer, 1e8)); // raw HOLLAR per raw ETH at 18 decimals
+        setup.run();
         new FundPool().run();
         (,,, uint128 liq) = ethHollar.core(ethHollarKey.toId());
         assertGt(liq, 0, "ETH/HOLLAR funded");
@@ -118,7 +130,7 @@ contract BandHookScriptsForkTest is Test {
     /// configures a RatioSource with ETH/USD first, and the pool is funded.
     function _ethHdxRefusesSwappedFeedsThenFunds() internal {
         ethHdxKey = _key(ethHdx, address(0), address(hdx), 60);
-        _poolEnv(ethHdx, address(0), address(hdx), 60, 18, 12);
+        _poolEnv(ethHdx, address(0), address(hdx), 60);
         _setS("SOURCE", "ratio");
         _setI("EXPECTED_TICK", _tickOf(ethAnswer * 1e12, 1e6 * 1e18)); // raw HDX per raw ETH
         _params(3000, 20000, 100800, 1000, 16000, 500, 300);
@@ -153,7 +165,7 @@ contract BandHookScriptsForkTest is Test {
         bool hdxIs0 = address(hdx) < address(hollar);
         (address c0, address c1) = hdxIs0 ? (address(hdx), address(hollar)) : (address(hollar), address(hdx));
         hdxHollarKey = _key(hdxHollar, c0, c1, 60);
-        _poolEnv(hdxHollar, c0, c1, 60, hdxIs0 ? 12 : 18, hdxIs0 ? 18 : 12);
+        _poolEnv(hdxHollar, c0, c1, 60);
         _setS("SOURCE", "single");
         _setA("FEED", address(hdxUsd));
         _setU("FEED_PRICES_TOKEN", hdxIs0 ? 0 : 1);
@@ -240,13 +252,11 @@ contract BandHookScriptsForkTest is Test {
         return uint256(d < 0 ? -d : d);
     }
 
-    function _poolEnv(BandHook hook, address c0, address c1, int24 spacing, uint8 dec0, uint8 dec1) internal {
+    function _poolEnv(BandHook hook, address c0, address c1, int24 spacing) internal {
         _setA("HOOK", address(hook));
         _setA("CURRENCY0", c0);
         _setA("CURRENCY1", c1);
         _setI("TICK_SPACING", spacing);
-        _setU("TOKEN0_DECIMALS", dec0);
-        _setU("TOKEN1_DECIMALS", dec1);
         _setU("TICK_TOLERANCE", 100);
     }
 
