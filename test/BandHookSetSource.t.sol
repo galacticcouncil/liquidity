@@ -115,18 +115,17 @@ contract BandHookSetSourceTest is Test {
 
     // ---------- the recovery path
 
-    /// The whole point: a source that stops answering used to end the pool. Now the
-    /// owner can replace it, and everything works again.
+    /// The whole point: a source that stops answering used to end the pool. Now the pool
+    /// keeps trading at the fee cap while nothing is placed, and the owner can replace it.
     function test_setSource_recoversAPoolWhoseSourceReverts() public {
         hook.fund(id, FUND, FUND);
         assertEq(_swapFee(), FLOOR, "trading normally to start with");
 
         source.kill();
 
-        vm.expectRevert();
-        _swap();
+        assertEq(_swapFee(), 20000, "while the source is dead, swaps pay the fee cap");
 
-        vm.expectRevert();
+        vm.expectRevert(BandHook.StaleOracle.selector);
         hook.recenter(id);
 
         MockPriceSource replacement = new MockPriceSource(1e18);

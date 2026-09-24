@@ -67,7 +67,8 @@ means and what to do:
 
 | Revert | Meaning | Response |
 |---|---|---|
-| `StaleOracle` | price source older than `staleAfter` (or unusable) | fix the feed/pipeline; nothing moved. Swaps continue at the floor fee |
+| `StaleOracle` | price source older than `staleAfter`, zero, or dated in the future | fix the feed/pipeline; nothing moved. Swaps continue at the floor fee |
+| `StaleOracle` | price source failing: it reverts, runs out of its 200k gas, or answers malformed | nothing moved. Swaps continue at the **fee cap**; the pool recovers by itself when the source answers again, or replace it with `setSource` |
 | `GuardTripped` | pool price > `guardTicks` from the oracle | wait for arbitrage to align the pool, or run `AnchorPool` (empty pool). Never force capital against an unverified price |
 | `EmptyBand` | nothing at all could be placed: the hook holds no tokens for this pool. A full band exit no longer causes it; the held token goes into the one-sided limit | fund the pool; nothing moved |
 
