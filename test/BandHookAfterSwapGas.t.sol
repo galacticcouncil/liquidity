@@ -144,6 +144,7 @@ contract BandHookAfterSwapGasTest is Test {
 /// The attempt alone, in the dearest shapes measured, called the way `afterSwap` calls it: by the
 /// hook, with the PoolManager unlocked. Each must fit in RECENTER_GAS, the least budget an attempt
 /// starts with; if a change makes the recenter dearer, this fails before an attempt runs dry.
+/// Run with --isolate for the cold costs, the ones a real swap pays; a plain run is warm and lower.
 contract BandHookAttemptGasTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -206,6 +207,37 @@ contract BandHookAttemptGasTest is Test {
         _measureAttempt("HDX shape, second leg", i);
     }
 
+    /// The HDX shape with its backstop, second recenter, the pool 299 ticks short of the oracle
+    /// (guard 300): the dearest natural case measured (audit B-3).
+    function test_attempt_hdxShape_secondRecenter_poolShortOfTheOracle() public {
+        (PoolKey memory k, PoolId i) = _pool(false, 60, 1000, 16_000, 3500, 20_000, 500, 300);
+        _moveBoth(k, -542);
+        hook.recenter(i);
+        _moveOracleAndPool(k, 1029, 730);
+        _measureAttempt("HDX shape, second recenter, pool 299 short", i);
+    }
+
+    /// The ETH/HOLLAR shape with two ERC20s, second recenter, the pool 199 ticks short (guard 200).
+    function test_attempt_erc20_secondRecenter_poolShortOfTheOracle() public {
+        (PoolKey memory k, PoolId i) = _pool(false, 10, 700, 11_000, 3500, 10_000, 350, 200);
+        _moveBoth(k, -392);
+        hook.recenter(i);
+        _moveOracleAndPool(k, 708, 509);
+        _measureAttempt("ERC20 ETH/HOLLAR shape, second recenter, pool 199 short", i);
+    }
+
+    /// The same, with a fifth of the funding of each token donated to the hook: the dearest case
+    /// measured, about 2k under the budget. The first test to fail if the attempt gets dearer.
+    function test_attempt_erc20_secondRecenter_withDonatedTokensInBoth() public {
+        (PoolKey memory k, PoolId i) = _pool(false, 10, 700, 11_000, 3500, 10_000, 350, 200);
+        _moveBoth(k, -392);
+        hook.recenter(i);
+        _moveOracleAndPool(k, 708, 509);
+        t0.transfer(HOOK_ADDR, FUND / 5);
+        t1.transfer(HOOK_ADDR, FUND / 5);
+        _measureAttempt("ERC20 ETH/HOLLAR shape, second recenter, pool 199 short, donated tokens", i);
+    }
+
     function _secondLeg(PoolKey memory k, PoolId i, int24 first, int24 second) internal {
         _moveBoth(k, first);
         hook.recenter(i);
@@ -253,14 +285,19 @@ contract BandHookAttemptGasTest is Test {
 
     /// The market moves to `tick`: the oracle follows it and a trade takes the pool there.
     function _moveBoth(PoolKey memory k, int24 tick) internal {
-        uint256 s = TickMath.getSqrtPriceAtTick(tick);
+        _moveOracleAndPool(k, tick, tick);
+    }
+
+    /// The oracle moves to `oracleTick` and a trade takes the pool to `poolTick`.
+    function _moveOracleAndPool(PoolKey memory k, int24 oracleTick, int24 poolTick) internal {
+        uint256 s = TickMath.getSqrtPriceAtTick(oracleTick);
         source.set((s * s >> 96) * 1e18 >> 96, block.timestamp);
         (, int24 now_,,) = manager.getSlot0(k.toId());
-        bool up = tick > now_;
+        bool up = poolTick > now_;
         bool paysEth = !up && k.currency0.isAddressZero();
         pusher.swap{value: paysEth ? 1_000_000 ether : 0}(
             k,
-            SwapParams({zeroForOne: !up, amountSpecified: -1e30, sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(tick)}),
+            SwapParams({zeroForOne: !up, amountSpecified: -1e30, sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(poolTick)}),
             PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             ""
         );

@@ -109,7 +109,8 @@ contract BandHook is IUnlockCallback {
     /// market by about this much: Chainlink ETH/USD only updates on a 0.5% move.
     uint256 internal constant GUARD_MARGIN_TICKS = 50;
     // in-swap recenter gas: the least an attempt starts with (the dearest measured attempt is about
-    // 510k, cold), the most it may spend, and what is always kept back for the rest of the swap
+    // 555k cold, about 600k with tokens donated to the hook), the most it may spend, and what is
+    // always kept back: a route needing a little under TAIL_GAS after this pool always goes through
     uint256 internal constant RECENTER_GAS = 600_000;
     uint256 internal constant RECENTER_MAX_GAS = 1_000_000;
     uint256 internal constant TAIL_GAS = 300_000;

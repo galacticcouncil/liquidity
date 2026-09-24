@@ -83,9 +83,11 @@ replacement against an expected tick, never calls the old source.
 
 A pool with `autoRecenter` on is also recentered at the end of the swap that
 makes it due (the hook's `afterSwap`), so no keeper is needed in the usual
-case. The trader whose swap triggers it pays the extra gas: about 390–420k,
-measured through the Universal Router on a fork of this chain, roughly $0.10
-at a typical base fee. Every other swap pays about 12k for the checks.
+case. The trader whose swap triggers it pays the extra gas: about 390–420k
+measured through the Universal Router on a fork of this chain (ETH/HOLLAR),
+up to about 560k in the dearest natural case measured (a second recenter on
+an HDX pool); roughly $0.10–0.13 at a typical base fee. Every other swap pays
+about 12k for the checks.
 
 - **It never fails a swap.** It is skipped whenever a gate says no: the same
   gates as `recenter()`, plus a non-empty core, no currency part-way through
@@ -98,10 +100,13 @@ at a typical base fee. Every other swap pays about 12k for the checks.
 - **An empty core is the keeper's job.** After a full band exit the recenter
   leaves no core and the limit holding everything; swaps then skip, and
   `recenter()`, which needs no trigger in that state, places it again.
-- **The one exception:** a route with more than ~450k gas of work after this
-  pool, whose gas was estimated before the recenter became due, and which
-  carries less spare than the recenter costs (~420–470k), can run out of gas.
-  2 to 5 of 1,512 real v4 swaps on this chain had that shape.
+- **What it guarantees, and the one gap:** the attempt never touches the last
+  300k, so a route with a little under 300k gas of work after this pool (about
+  290k) always goes through. A longer route whose gas was estimated before the recenter became
+  due can run out when the hook sees just enough gas to try: the attempt costs
+  up to ~555k (~600k with tokens donated to the hook), so the gap starts at
+  ~315–345k of work after this pool. 8 to 9 of 1,512 real v4 swaps on this
+  chain had that shape.
 - **How often it fires:** only swaps sent with that much gas to spare can pay
   for it: about a quarter of real v4 swaps here, mostly bots and aggregators,
   and about 5% of wallet trades through the Universal Router.

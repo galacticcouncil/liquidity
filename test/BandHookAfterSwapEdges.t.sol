@@ -114,19 +114,23 @@ contract BandHookAfterSwapEdgesTest is Test {
         assertLt(used, 1_000_000, "bounded by the attempt's budget, not by the revert's size");
     }
 
-    // ---------- the rule's one gap: a long route after our pool
+    // ---------- the guarantee and the gap: a route's work after our pool
 
-    /// About 400k of work after our pool: under the 900k gate minus the ~460k the recenter costs.
-    /// Whatever margin the route carries over its estimate, either too little gas is left at our
-    /// hook and the recenter is skipped, or enough is left for both.
-    function test_tail_aRouteWithLittleWorkAfterOurPool_alwaysGoesThrough() public {
-        (PoolKey memory k, PoolId i, uint160 limit, uint256 est) = _dueForTailRoute(16);
-        assertTrue(_sendTail(k, limit, 16, est + 20_000), "small margin: goes through");
-        assertTrue(_sendTail(k, limit, 16, est + 250_000), "bigger margin: goes through");
-        assertTrue(_sendTail(k, limit, 16, est + 470_000), "near the recenter's cost: goes through");
-        assertEq(_centre(i), 0, "all three skipped the recenter");
-        assertTrue(_sendTail(k, limit, 16, est + 700_000), "generous margin: goes through");
-        assertEq(_centre(i), 392, "and pays for the recenter");
+    /// About 270k of work after our pool (9 writes, then paying and settling), in the dearest
+    /// natural shape. The attempt never gets the last TAIL_GAS (300k): it is skipped, it runs, or it
+    /// runs dry and is undone, and each way leaves the route what it needs. So every margin over the
+    /// route's estimate goes through, and the larger ones also pay for the recenter.
+    function test_tail_upTo300kAfterOurPool_alwaysGoesThrough() public {
+        (PoolKey memory k, PoolId i, uint160 limit, uint256 est) = _dueForTailRouteInTheHdxShape(9);
+        int24 before = _centre(i);
+        uint256 recentered;
+        for (uint256 m = 0; m <= 800_000; m += 5_000) {
+            uint256 snap = vm.snapshotState();
+            assertTrue(_sendTail(k, limit, 9, est + m), "every margin goes through");
+            if (_centre(i) != before) recentered++;
+            vm.revertToState(snap);
+        }
+        assertGt(recentered, 0, "the larger margins recenter too");
     }
 
     /// About 1M of work after our pool clears the gate on its own. If the route's gas was estimated
@@ -155,6 +159,44 @@ contract BandHookAfterSwapEdgesTest is Test {
         limit = TickMath.getSqrtPriceAtTick(380);
         est = _leastGasThatWorks(k, limit, writes);
         hook.setAutoRecenter(i, true);
+    }
+
+    /// An HDX-shaped pool (spacing 60, band +-1000, backstop, 2% cap, guard 300) whose second
+    /// recenter is due for the next swap: recentred at -542, then the oracle at 1029 with the pool 299
+    /// ticks short. The route's gas is estimated with the switch off, as before the oracle moved.
+    function _dueForTailRouteInTheHdxShape(uint256 writes)
+        internal
+        returns (PoolKey memory k, PoolId i, uint160 limit, uint256 est)
+    {
+        (address a, address b) = _twoTokens();
+        IToken(b).approve(address(tail), type(uint256).max);
+        k = PoolKey({
+            currency0: Currency.wrap(a),
+            currency1: Currency.wrap(b),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(HOOK_ADDR)
+        });
+        i = k.toId();
+        BandHook.PoolConfig memory c = _cfg();
+        (c.feeCap, c.halfBandTicks, c.backstopHalfTicks) = (20_000, 1000, 16_000);
+        (c.triggerTicks, c.guardTicks, c.autoRecenter) = (500, 300, false);
+        hook.configure(k, c);
+        manager.initialize(k, TickMath.getSqrtPriceAtTick(0));
+        hook.fund(i, FUND, FUND);
+        _oracleTo(-542);
+        _swapTo(k, -542);
+        hook.recenter(i);
+        _oracleTo(1029);
+        _swapTo(k, 730);
+        limit = TickMath.getSqrtPriceAtTick(735);
+        est = _leastGasThatWorks(k, limit, writes);
+        hook.setAutoRecenter(i, true);
+    }
+
+    function _oracleTo(int24 tick) internal {
+        uint256 s = TickMath.getSqrtPriceAtTick(tick);
+        source.set((s * s >> 96) * 1e18 >> 96, block.timestamp);
     }
 
     /// The least gas limit the route succeeds with, found by halving the gap: what a wallet's
