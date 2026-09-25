@@ -76,6 +76,12 @@ means and what to do:
 the drift trigger, but keeps the freshness and guard checks. Useful after
 `setParams` changes band geometry.
 
+`sweep(currency, to, amount)` recovers anything the hook holds: ETH
+(`currency` 0x0) or any token, including one sent by mistake. `to` of 0 means
+the owner, `amount` of 0 means the whole balance. It moves only what sits in
+the hook itself, never the positions, so for a pool's own token it takes only
+idle amounts such as a donation.
+
 `setSource` is the recovery path for a dead feed: owner-only, validates the
 replacement against an expected tick, never calls the old source.
 

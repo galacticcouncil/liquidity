@@ -127,6 +127,7 @@ contract BandHook is IUnlockCallback {
     /// bytes of the revert (an error selector), or zero when nothing came back.
     event RecenterSkipped(PoolId indexed id, bytes4 reason);
     event Withdrawn(PoolId indexed id, uint256 amount0, uint256 amount1);
+    event Swept(Currency indexed currency, address indexed to, uint256 amount);
 
     error NotOwner();
     error NotManager();
@@ -408,6 +409,18 @@ contract BandHook is IUnlockCallback {
         if (b0 > 0) _push(key.currency0, owner, b0);
         if (b1 > 0) _push(key.currency1, owner, b1);
         emit Withdrawn(id, b0, b1);
+    }
+
+    /// @notice Send ETH or any token the hook holds to `to`: a pool's own currency (only what sits
+    /// idle; positions are untouched) or one sent by mistake. Owner only. Native ETH is currency
+    /// address 0. `to` of zero means the owner; `amount` of zero means the whole balance.
+    /// @dev The hook's own balance only ever holds the owner's tokens, donations and mistakes:
+    /// other providers' liquidity lives in the PoolManager, which this never touches.
+    function sweep(Currency currency, address to, uint256 amount) external onlyOwner {
+        if (to == address(0)) to = owner;
+        if (amount == 0) amount = _idle(currency);
+        if (amount > 0) _push(currency, to, amount);
+        emit Swept(currency, to, amount);
     }
 
     // ---------- unlock callback
