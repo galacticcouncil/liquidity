@@ -36,13 +36,19 @@ file per pool from its example: `.env.eth-hollar`, `.env.hdx-hollar`,
 
 ## Run order
 
-Per pool, the initialize → fund sequence must run in **immediate succession**:
-an empty pool cannot be arbitraged, so its price freezes at `initialize` and
-drifts from market; `fund` refuses against a price outside `guardTicks` of the
-oracle. If the pool sat idle after initialization, or someone else initialized
-it first, `01_SetupPool` and `02_Fund` say so, and `AnchorPool` moves it back
-onto the oracle (tiny straddling position, one swap with `sqrtPriceLimitX96`
-at the oracle price, burn — a little of each token, capped by `ANCHOR_MAX0/1`).
+Per pool, run `01_SetupPool` and `02_Fund` back to back. Until the first
+`fund`, and again after a full `withdraw`, the pool holds no liquidity, and
+**anyone can move an empty pool's price for free**: a 1-wei swap with a price
+limit lands exactly on that limit and costs only gas. `fund` refuses a pool
+further than `guardTicks` from the oracle (`GuardTripped`), so a move like
+that only delays the launch; nothing is lost. If `01_SetupPool` or `02_Fund`
+says the pool is off the oracle, run `AnchorPool` (tiny straddling position,
+one swap with `sqrtPriceLimitX96` at the oracle price, burn — a little of each
+token, capped by `ANCHOR_MAX0/1`), then `02_Fund` again, and repeat if someone
+keeps moving it. A move that stays inside the guard is not refused: the first
+fund is then placed while the pool sits up to `guardTicks` off the oracle, and
+the mover can trade it back for a small profit (measured: under 2 bps of the
+fund on ETH/HOLLAR at guard 200).
 
 ```sh
 forge test                                   # all green, incl. fork tests (uses the "robinhood" rpc alias)
@@ -52,7 +58,7 @@ set -a; source .env.eth-hollar; set +a
 forge script script/00_DeployBandHook.s.sol --rpc-url robinhood --broadcast  # this pool's hook; put the printed HOOK in .env.eth-hollar
 set -a; source .env.eth-hollar; set +a                                        # reload with HOOK set
 forge script script/01_SetupPool.s.sol --rpc-url robinhood --broadcast       # source, expected-tick check, configure, initialize at the oracle price
-forge script script/AnchorPool.s.sol --rpc-url robinhood --broadcast         # only if 01 or 02 says the pool is off the oracle
+forge script script/AnchorPool.s.sol --rpc-url robinhood --broadcast         # only if 01 or 02 says the pool is off the oracle; then 02 again
 forge script script/02_Fund.s.sol --rpc-url robinhood --broadcast            # FUND_AMOUNT0/1, immediately after 01
 forge script script/03_HandOff.s.sol --rpc-url robinhood --broadcast         # then the multisig calls acceptOwnership() on this hook
 ```
