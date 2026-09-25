@@ -27,7 +27,7 @@ contract BandHookForkTest is Test {
     IPoolManager constant MANAGER = IPoolManager(0x8366a39CC670B4001A1121B8F6A443A643e40951);
     IAggregatorV3 constant ETH_USD = IAggregatorV3(0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9);
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
 
     BandHook hook;
     ChainlinkSource source;
@@ -43,10 +43,8 @@ contract BandHookForkTest is Test {
         MockERC20 a = new MockERC20("Wrapped Ether", "WETH", 18);
         MockERC20 b = new MockERC20("Hollar", "HOLLAR", 18);
         (weth, hollar) = address(a) < address(b) ? (a, b) : (b, a);
-        bool wethIs0 = address(weth) < address(hollar);
-
-        // real feed; orient so the source prices pool token0 in token1
-        source = new ChainlinkSource(ETH_USD, !wethIs0, 18, 18);
+        // real feed, which prices WETH; the source works out the orientation itself
+        source = new ChainlinkSource(ETH_USD, address(weth), address(hollar));
 
         deployCodeTo("BandHook.sol:BandHook", abi.encode(MANAGER, address(this)), HOOK_ADDR);
         hook = BandHook(payable(HOOK_ADDR));
@@ -72,8 +70,9 @@ contract BandHookForkTest is Test {
                 backstopHalfTicks: 11000, // ~÷3..×3
                 backstopBps: 3500,
                 triggerTicks: 350, // ~3.5%
-                guardTicks: 150,
-                enabled: true
+                guardTicks: 200,
+                enabled: true,
+                autoRecenter: false
             })
         );
 

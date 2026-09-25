@@ -38,7 +38,7 @@ contract BandHookFundGuardTest is Test {
     PoolKey nativeKey;
     PoolId nativeId;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     address mallory = makeAddr("mallory");
     uint256 constant FUND = 100_000e18;
     int24 constant GUARD = 100;
@@ -64,7 +64,8 @@ contract BandHookFundGuardTest is Test {
             hooks: IHooks(HOOK_ADDR)
         });
         id = key.toId();
-        hook.configure(key, _cfg(IPriceSource(address(source)), GUARD, 20000));
+        // cap 0.35%: low enough that a 100-tick guard clears the dead band rule
+        hook.configure(key, _cfg(IPriceSource(address(source)), GUARD, 3500));
         manager.initialize(key, TickMath.getSqrtPriceAtTick(0));
 
         nativeKey = PoolKey({
@@ -75,7 +76,8 @@ contract BandHookFundGuardTest is Test {
             hooks: IHooks(HOOK_ADDR)
         });
         nativeId = nativeKey.toId();
-        hook.configure(nativeKey, _cfg(IPriceSource(address(nativeSource)), 150, 10000));
+        // cap 0.8%: low enough that the 150-tick guard clears the dead band rule
+        hook.configure(nativeKey, _cfg(IPriceSource(address(nativeSource)), 150, 8000));
         manager.initialize(nativeKey, TickMath.getSqrtPriceAtTick(78244));
 
         t0.mint(address(this), 5_000_000e18);
@@ -110,7 +112,8 @@ contract BandHookFundGuardTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: guardTicks,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -140,6 +143,23 @@ contract BandHookFundGuardTest is Test {
         uint160 s = TickMath.getSqrtPriceAtTick(t);
         uint256 px96 = FullMath.mulDiv(s, s, 1 << 96);
         src.set(FullMath.mulDiv(px96, 1e18, 1 << 96), block.timestamp);
+    }
+
+    function poolTickOf(PoolId pid) internal view returns (int24 t) {
+        (, t,,) = manager.getSlot0(pid);
+    }
+
+    /// The same push as above, for a pool other than the main one.
+    function pushPoolToTick(PoolKey memory k, int24 target) internal {
+        uint160 limit = TickMath.getSqrtPriceAtTick(target);
+        (uint160 current,,,) = manager.getSlot0(k.toId());
+        vm.prank(mallory);
+        swapRouter.swap(
+            k,
+            SwapParams({zeroForOne: limit < current, amountSpecified: -5_000_000e18, sqrtPriceLimitX96: limit}),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
     }
 
     // ---------- a stale oracle
@@ -267,25 +287,42 @@ contract BandHookFundGuardTest is Test {
         assertGt(cliq, 0, "native pool funded");
     }
 
-    // ---------- the coupling this decision accepts
+    // ---------- the coupling issue #2 fixed
 
-    /// PINS AUDIT FINDING H1, which is open for Ben. `fund` now shares `guardTicks` with
-    /// `recenter`. On the HDX pools that guard is 200, while a 2% fee cap leaves arbitrage
-    /// resting 203 ticks from the oracle (measured in the audit). So after any ordinary
-    /// price move, an HDX top-up is refused - no attacker involved. When H1 widens the
-    /// guard, this test changes and says so.
-    function test_hdxGuardIsTooTightForAnOrdinaryTopUp() public {
+    /// AUDIT FINDING H1, fixed by issue #2. `fund` shares `guardTicks` with `recenter`, and a
+    /// 2% fee cap leaves arbitrage resting up to 212 ticks from the oracle, so HDX's old guard
+    /// of 200 refused ordinary top-ups. That guard is now refused at configure time, and at 300
+    /// a fund, a recentre and a top-up all go through with the pool parked at the rest point.
+    function test_hdxAtTheNewGuard_fundsAndRecentresAtTheRestPoint() public {
         PoolKey memory hdx = key;
         hdx.tickSpacing = 60;
         PoolId hdxId = hdx.toId();
+
+        vm.expectRevert(BandHook.BadConfig.selector);
         hook.configure(hdx, _cfg(IPriceSource(address(source)), 200, 20000));
+
+        hook.configure(hdx, _cfg(IPriceSource(address(source)), 300, 20000));
         manager.initialize(hdx, TickMath.getSqrtPriceAtTick(0));
 
-        // the pool rests where arbitrage leaves it at a 2% cap
-        setOracleTick(source, 203);
-
-        vm.expectRevert(BandHook.GuardTripped.selector);
+        // an empty pool parked where arbitrage leaves it: the oracle 212 ticks away
+        setOracleTick(source, 212);
         hook.fund(hdxId, FUND, FUND);
+        (,, int24 center, uint128 liq) = hook.core(hdxId);
+        assertEq(center, 212, "funded around the oracle");
+        assertGt(liq, 0, "with the pool 212 ticks away");
+
+        // the market moves on 600 ticks and arbitrage parks the pool 212 ticks behind it
+        setOracleTick(source, 812);
+        pushPoolToTick(hdx, 600);
+        hook.recenter(hdxId);
+        (,, int24 newCenter,) = hook.core(hdxId);
+        assertEq(newCenter, 812, "recentred with the pool parked at the rest point");
+
+        // a top-up at the parked pool goes through as well
+        assertEq(poolTickOf(hdxId), 600, "the pool is still 212 ticks from the oracle");
+        hook.fund(hdxId, FUND / 10, FUND / 10);
+        (,,, uint128 liqAfter) = hook.core(hdxId);
+        assertGt(liqAfter, 0, "topped up");
     }
 
     receive() external payable {}

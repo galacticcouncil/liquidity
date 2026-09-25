@@ -32,7 +32,7 @@ contract BandHookValidateConfigTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     int24 constant MAX_TICK = TickMath.MAX_TICK; // 887272
     int24 constant MAX_HALF_BAND = MAX_TICK / 4; // halfBandTicks * MAX_EXTENSION_MULT must fit
 
@@ -75,8 +75,9 @@ contract BandHookValidateConfigTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
-            enabled: true
+            guardTicks: 300,
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -106,14 +107,15 @@ contract BandHookValidateConfigTest is Test {
 
     // ---------- the fee ceiling
 
-    /// Exactly 100% is the largest fee Uniswap accepts, so the hook accepts it too.
-    function test_feeCap_atMaxLpFee_isAccepted() public {
+    /// Exactly 100% is the largest fee Uniswap accepts, but at 100% arbitrage never pays, so no
+    /// guard can clear the dead band. Refused even with the widest band and guard allowed.
+    function test_feeCap_atMaxLpFee_isRejected() public {
         BandHook.PoolConfig memory cfg = _base();
         cfg.feeCap = LPFeeLibrary.MAX_LP_FEE;
-        hook.configure(key, cfg);
-        (, uint24 floorFee, uint24 capFee,,,,,,,,) = hook.config(id);
-        assertEq(capFee, 1_000_000, "cap stored");
-        assertEq(floorFee, 3000, "floor stored");
+        cfg.halfBandTicks = MAX_HALF_BAND;
+        cfg.guardTicks = MAX_HALF_BAND - 1;
+        cfg.backstopHalfTicks = 0;
+        _expectRejected(cfg);
     }
 
     /// One ppm above it is rejected. This used to be accepted, and then swaps that
@@ -227,7 +229,8 @@ contract BandHookValidateConfigTest is Test {
         hook.setParams(id, stale);
     }
 
-    /// No regression: the three real launch configurations still validate.
+    /// No regression: the launch configurations validate, with the guards issue #2 set
+    /// (ETH/HOLLAR 200 at a 1% cap, HDX 300 at a 2% cap).
     function test_launchConfigurations_stillValidate() public {
         BandHook.PoolConfig memory ethHollar = _base();
         ethHollar.feeFloor = 800;
@@ -237,7 +240,7 @@ contract BandHookValidateConfigTest is Test {
         ethHollar.backstopHalfTicks = 11000;
         ethHollar.backstopBps = 3500;
         ethHollar.triggerTicks = 350;
-        ethHollar.guardTicks = 150;
+        ethHollar.guardTicks = 200;
         hook.configure(key, ethHollar);
 
         PoolKey memory k2 = key;
@@ -250,7 +253,51 @@ contract BandHookValidateConfigTest is Test {
         hdx.backstopHalfTicks = 16000;
         hdx.backstopBps = 3500;
         hdx.triggerTicks = 500;
-        hdx.guardTicks = 200;
+        hdx.guardTicks = 300;
         hook.configure(k2, hdx);
+    }
+
+    // ---------- the guard must clear the fee cap's dead band (issue #2)
+
+    /// Bob configures an HDX pool with guard 200 at a 2% cap: refused with BadConfig. Arbitrage
+    /// rests up to 212 ticks from the oracle there, so a 200 guard would block the pool.
+    function test_guardInsideTheDeadBand_isRejected() public {
+        BandHook.PoolConfig memory hdx = _base();
+        hdx.guardTicks = 200;
+        _expectRejected(hdx);
+    }
+
+    /// At a 2% cap the line falls between 264, refused, and 265, accepted. At a 1% cap it
+    /// falls between 161 and 162.
+    function test_guardAtTheDeadBandEdge_rejectedThenAccepted() public {
+        BandHook.PoolConfig memory cfg = _base();
+        cfg.guardTicks = 264;
+        _expectRejected(cfg);
+        cfg.guardTicks = 265;
+        hook.configure(key, cfg);
+        (,,,,,,,,, int24 stored,,) = hook.config(id);
+        assertEq(stored, 265, "the first accepted guard at a 2% cap");
+
+        PoolKey memory k2 = key;
+        k2.tickSpacing = 60;
+        cfg.feeCap = 10000;
+        cfg.guardTicks = 161;
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.configure(k2, cfg);
+        cfg.guardTicks = 162;
+        hook.configure(k2, cfg);
+        (,,,,,,,,, stored,,) = hook.config(k2.toId());
+        assertEq(stored, 162, "the first accepted guard at a 1% cap");
+    }
+
+    /// Bob's live pool has guard 300. setParams down to 200 is refused, and 300 stays.
+    function test_setParams_cannotPullTheGuardIntoTheDeadBand() public {
+        hook.configure(key, _base());
+        BandHook.PoolConfig memory tighter = _base();
+        tighter.guardTicks = 200;
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setParams(id, tighter);
+        (,,,,,,,,, int24 guard,,) = hook.config(id);
+        assertEq(guard, 300, "the live guard is unchanged");
     }
 }

@@ -40,7 +40,7 @@ contract BandHookGuardRailsTest is Test {
     PoolKey nativeKey;
     PoolId nativeId;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     uint256 constant FUND = 100_000e18;
     int24 constant HALF = 1000;
 
@@ -78,7 +78,7 @@ contract BandHookGuardRailsTest is Test {
         nativeId = nativeKey.toId();
         BandHook.PoolConfig memory nc = _base();
         nc.source = IPriceSource(address(nativeSource));
-        nc.guardTicks = 150;
+        nc.guardTicks = 300;
         hook.configure(nativeKey, nc);
         manager.initialize(nativeKey, TickMath.getSqrtPriceAtTick(78244));
 
@@ -104,8 +104,9 @@ contract BandHookGuardRailsTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
-            enabled: true
+            guardTicks: 300,
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -144,7 +145,7 @@ contract BandHookGuardRailsTest is Test {
 
     /// And the mined address is accepted, which the whole suite depends on.
     function test_R9_theMinedAddressIsAccepted() public view {
-        assertEq(uint160(HOOK_ADDR) & 0x3FFF, 0x1080, "afterInitialize | beforeSwap");
+        assertEq(uint160(HOOK_ADDR) & 0x3FFF, 0x10C0, "afterInitialize | beforeSwap | afterSwap");
         assertEq(address(hook), HOOK_ADDR, "and the hook lives there");
     }
 
@@ -215,12 +216,13 @@ contract BandHookGuardRailsTest is Test {
         hook.setParams(id, c);
     }
 
-    /// The real launch configurations, and R4's proposed HDX guard of 300, all still pass.
-    function test_theLaunchValuesAndR4sProposalStillValidate() public {
+    /// The launch configurations as issue #2 set them all pass these rails too: ETH/HOLLAR
+    /// guard 200, and HDX guard 300 (R4's proposal, now adopted).
+    function test_theLaunchValuesValidate() public {
         BandHook.PoolConfig memory eth = _base();
         eth.feeFloor = 800; eth.feeCap = 10000; eth.staleAfter = 100800;
         eth.halfBandTicks = 700; eth.backstopHalfTicks = 11000; eth.backstopBps = 3500;
-        eth.triggerTicks = 350; eth.guardTicks = 150;
+        eth.triggerTicks = 350; eth.guardTicks = 200;
         hook.configure(_freshKey(60), eth);
 
         BandHook.PoolConfig memory hdx = _base();

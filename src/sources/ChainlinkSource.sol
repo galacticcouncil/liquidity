@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {IPriceSource} from "../interfaces/IPriceSource.sol";
+import {TokenDecimals} from "./TokenDecimals.sol";
 
 interface IAggregatorV3 {
     function decimals() external view returns (uint8);
@@ -11,9 +12,10 @@ interface IAggregatorV3 {
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 }
 
-/// @notice Single Chainlink feed priced in a USD-stable quote token (e.g. WETH/HOLLAR
-/// via the ETH/USD feed, treating HOLLAR as $1). `invert` flips the feed when the
-/// feed's base asset is the pool's token1 rather than token0.
+/// @notice Single Chainlink feed priced in a USD-stable quote token (e.g. ETH/HOLLAR
+/// via the ETH/USD feed, treating HOLLAR as $1). Built from the two pool tokens: the one
+/// the feed prices and the other. Decimals come from the tokens, and `invert` is worked out
+/// from their addresses: it flips the feed when the token it prices is the pool's token1.
 contract ChainlinkSource is IPriceSource {
     IAggregatorV3 public immutable feed;
     bool public immutable invert;
@@ -24,13 +26,13 @@ contract ChainlinkSource is IPriceSource {
     /// @notice The token decimals given would scale every price to zero.
     error BadDecimals();
 
-    constructor(IAggregatorV3 _feed, bool _invert, uint8 baseTokenDecimals, uint8 quoteTokenDecimals) {
+    constructor(IAggregatorV3 _feed, address pricedToken, address otherToken) {
         feed = _feed;
-        invert = _invert;
+        invert = pricedToken > otherToken; // v4 sorts currencies by address: the higher is token1
         feedScale = 10 ** _feed.decimals();
         // price of one raw base unit in raw quote units, X18:
         // human price * 10^quoteDec / 10^baseDec * 1e18
-        scaleNum = 10 ** (18 + quoteTokenDecimals) / 10 ** baseTokenDecimals;
+        scaleNum = 10 ** (18 + TokenDecimals.read(otherToken)) / 10 ** TokenDecimals.read(pricedToken);
         if (scaleNum == 0) revert BadDecimals();
     }
 
