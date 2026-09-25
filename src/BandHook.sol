@@ -181,6 +181,10 @@ contract BandHook is IUnlockCallback {
 
     // ---------- configuration
 
+    /// @notice Set up a pool on this hook, once. Owner only.
+    /// @dev Does not check the source. The repo's sources take their decimals and orientation
+    /// from the token addresses, and `01_SetupPool` checks the chosen feed against the operator's
+    /// `EXPECTED_TICK` before it calls this. A later replacement goes through `setSource`.
     function configure(PoolKey calldata key, PoolConfig calldata cfg) external onlyOwner {
         PoolId id = key.toId();
         if (address(config[id].source) != address(0)) revert AlreadyConfigured();
@@ -210,8 +214,9 @@ contract BandHook is IUnlockCallback {
     /// with the wrong orientation or the wrong decimals lands nowhere near it, which is the
     /// one mistake the contract cannot otherwise detect.
     /// @param tolerance How many ticks of difference to accept. Must not be negative.
-    /// @dev The only way to recover a pool whose source has stopped answering: it never
-    /// calls the old source, so it works even while every swap is reverting.
+    /// @dev The way to replace a source that has stopped answering; meanwhile swaps pay the fee
+    /// cap and nothing is placed, and the pool also recovers by itself if the source answers
+    /// again. It never calls the old source, so it works whatever state that source is in.
     /// @dev Freshness is judged exactly as `_oracleTick` judges it, so a source this accepts is
     /// one the hook will use. A timestamp from the future is refused, not trusted for ever.
     function setSource(PoolId id, IPriceSource newSource, int24 expectedTick, int24 tolerance)

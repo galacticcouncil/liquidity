@@ -67,7 +67,7 @@ contract BandHookAfterSwapForkTest is Test {
         vm.createSelectFork("robinhood");
         pusher = new PoolSwapTest(MANAGER);
         hollar = new MockERC20("Hollar", "HOLLAR", 18);
-        source = new ChainlinkSource(ETH_USD, false, 18, 18); // native ETH is currency0
+        source = new ChainlinkSource(ETH_USD, address(0), address(hollar)); // the feed prices native ETH
         deployCodeTo("BandHook.sol:BandHook", abi.encode(MANAGER, address(this)), HOOK_ADDR);
         hook = BandHook(payable(HOOK_ADDR));
 

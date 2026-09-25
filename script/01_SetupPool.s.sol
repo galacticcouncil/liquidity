@@ -13,7 +13,6 @@ pragma solidity 0.8.26;
 // says so, and the pool must go through AnchorPool before 02_Fund.
 
 import {console2} from "forge-std/Script.sol";
-import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {Currency} from "v4-core/types/Currency.sol";
@@ -62,34 +61,34 @@ contract SetupPool is PoolScript {
         console2.logBytes32(PoolId.unwrap(id));
     }
 
-    /// @dev SOURCE=ratio divides FEED0_USD (prices token0) by FEED1_USD (prices token1).
-    /// SOURCE=single reads FEED, which prices pool token FEED_PRICES_TOKEN (0 or 1) in a
-    /// USD-stable other token. Decimals are read from the pool's tokens, never typed in.
+    /// @dev Every feed is named with the token it prices, by address, and the source works out the
+    /// orientation and the decimals itself. SOURCE=single reads FEED, which prices FEED_PRICES in
+    /// the pool's other, USD-stable token. SOURCE=ratio divides two USD feeds, FEED_A (prices
+    /// FEED_A_PRICES) and FEED_B (prices FEED_B_PRICES), named in any order.
     function _deploySource(PoolKey memory key) internal returns (IPriceSource) {
-        uint8 dec0 = _tokenDecimals(Currency.unwrap(key.currency0));
-        uint8 dec1 = _tokenDecimals(Currency.unwrap(key.currency1));
+        address c0 = Currency.unwrap(key.currency0);
+        address c1 = Currency.unwrap(key.currency1);
         bytes32 kind = keccak256(bytes(vm.envString("SOURCE")));
         if (kind == keccak256("ratio")) {
-            IAggregatorV3 feed0 = IAggregatorV3(vm.envAddress("FEED0_USD"));
-            IAggregatorV3 feed1 = IAggregatorV3(vm.envAddress("FEED1_USD"));
-            return IPriceSource(address(new RatioSource(feed0, feed1, dec0, dec1)));
+            address tokenA = vm.envAddress("FEED_A_PRICES");
+            address tokenB = vm.envAddress("FEED_B_PRICES");
+            require(
+                (tokenA == c0 && tokenB == c1) || (tokenA == c1 && tokenB == c0),
+                "FEED_A_PRICES and FEED_B_PRICES must be the pool's two tokens"
+            );
+            IAggregatorV3 feedA = IAggregatorV3(vm.envAddress("FEED_A"));
+            IAggregatorV3 feedB = IAggregatorV3(vm.envAddress("FEED_B"));
+            return IPriceSource(address(new RatioSource(tokenA, feedA, tokenB, feedB)));
         }
         require(kind == keccak256("single"), "SOURCE must be single or ratio");
-        uint256 pricesToken = vm.envUint("FEED_PRICES_TOKEN");
-        require(pricesToken <= 1, "FEED_PRICES_TOKEN must be 0 or 1");
-        bool invert = pricesToken == 1;
+        address priced = vm.envAddress("FEED_PRICES");
+        require(priced == c0 || priced == c1, "FEED_PRICES must be one of the pool's two tokens");
         IAggregatorV3 feed = IAggregatorV3(vm.envAddress("FEED"));
-        return IPriceSource(address(new ChainlinkSource(feed, invert, invert ? dec1 : dec0, invert ? dec0 : dec1)));
+        return IPriceSource(address(new ChainlinkSource(feed, priced, priced == c0 ? c1 : c0)));
     }
 
-    /// @dev A pool currency's decimals: 18 for native ETH (address 0), otherwise the token's own.
-    /// A token without decimals() or an address with no code reverts, which stops the script.
-    function _tokenDecimals(address token) internal view returns (uint8) {
-        return token == address(0) ? 18 : IERC20(token).decimals();
-    }
-
-    /// @dev The one mistake nothing else catches: a source the wrong way up or with the wrong
-    /// decimals. The operator states the tick the market implies; the source must agree.
+    /// @dev The one mistake nothing else catches: the wrong feed, or a feed named with the wrong
+    /// token. The operator states the tick the market implies; the source must agree.
     function _checkExpectedTick(IPriceSource source) internal view {
         (, int24 tick) = _oracle(source, vm.envUint("STALE_AFTER_S"));
         int24 expected = int24(vm.envInt("EXPECTED_TICK"));
@@ -100,7 +99,7 @@ contract SetupPool is PoolScript {
                     vm.toString(int256(tick)),
                     ", expected ",
                     vm.toString(int256(expected)),
-                    ": check the feed order, the feed addresses and the token decimals"
+                    ": check each feed's address and the token it is named with"
                 )
             );
         }

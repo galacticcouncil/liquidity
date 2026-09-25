@@ -73,7 +73,7 @@ contract BandHookScriptsForkTest is Test {
     function test_launchRoutine_threePoolsOnThreeHooks() public {
         _deployOneHookPerPool();
         _setUpAndFundEthHollar();
-        _ethHdxRefusesSwappedFeedsThenFunds();
+        _ethHdxRefusesMispairedFeedsThenFunds();
         _hdxHollarInitializedByAStrangerIsAnchoredThenFunded();
         _withdrawingOnePoolLeavesTheOthersUntouched();
         _handEachHookToTheMultisig();
@@ -97,14 +97,14 @@ contract BandHookScriptsForkTest is Test {
     }
 
     /// ETH/HOLLAR: one Chainlink feed. An expected tick worked out as if HOLLAR had 8 decimals
-    /// (as Wormhole wraps) is refused before anything is configured, because the script reads the
+    /// (as Wormhole wraps) is refused before anything is configured, because the source reads the
     /// token's real 18; the right one initializes the pool at the oracle price, and it is funded.
     function _setUpAndFundEthHollar() internal {
         ethHollarKey = _key(ethHollar, address(0), address(hollar), 10);
         _poolEnv(ethHollar, address(0), address(hollar), 10);
         _setS("SOURCE", "single");
         _setA("FEED", address(ETH_USD));
-        _setU("FEED_PRICES_TOKEN", 0);
+        _setA("FEED_PRICES", address(0)); // the feed prices ETH
         _params(800, 10000, 100800, 700, 11000, 350, 200);
         _setU("FUND_AMOUNT0", 10 ether);
         _setU("FUND_AMOUNT1", 10 * ethAnswer * 1e10);
@@ -126,9 +126,10 @@ contract BandHookScriptsForkTest is Test {
         assertGt(liq, 0, "ETH/HOLLAR funded");
     }
 
-    /// ETH/HDX: the issue's feed order is refused before anything is configured; the right order
-    /// configures a RatioSource with ETH/USD first, and the pool is funded.
-    function _ethHdxRefusesSwappedFeedsThenFunds() internal {
+    /// ETH/HDX: feeds named with the wrong tokens are refused before anything is configured.
+    /// Named rightly, here HDX first to show the order no longer matters, the source puts ETH/USD
+    /// on top (ETH is token0), and the pool is funded.
+    function _ethHdxRefusesMispairedFeedsThenFunds() internal {
         ethHdxKey = _key(ethHdx, address(0), address(hdx), 60);
         _poolEnv(ethHdx, address(0), address(hdx), 60);
         _setS("SOURCE", "ratio");
@@ -137,19 +138,23 @@ contract BandHookScriptsForkTest is Test {
         _setU("FUND_AMOUNT0", 5 ether);
         _setU("FUND_AMOUNT1", 5 * ethAnswer * 1e12 / 1e6);
 
-        _setA("FEED0_USD", address(hdxUsd)); // the order the issue writes: HDX/USD first
-        _setA("FEED1_USD", address(ETH_USD));
+        _setA("FEED_A", address(hdxUsd)); // the HDX feed named with ETH, and the other way round
+        _setA("FEED_A_PRICES", address(0));
+        _setA("FEED_B", address(ETH_USD));
+        _setA("FEED_B_PRICES", address(hdx));
         SetupPool setup = new SetupPool();
         try setup.run() {
-            assertTrue(false, "the swapped feeds should have been refused");
+            assertTrue(false, "the mispaired feeds should have been refused");
         } catch Error(string memory reason) {
             assertEq(_prefix(reason, 17), "source reads tick", "refused by the expected-tick check");
         }
         (IPriceSource none,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(none), address(0), "nothing configured");
 
-        _setA("FEED0_USD", address(ETH_USD));
-        _setA("FEED1_USD", address(hdxUsd));
+        _setA("FEED_A", address(hdxUsd)); // each feed with its own token, HDX's pair first
+        _setA("FEED_A_PRICES", address(hdx));
+        _setA("FEED_B", address(ETH_USD));
+        _setA("FEED_B_PRICES", address(0));
         new SetupPool().run();
         (IPriceSource source,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(RatioSource(address(source)).feedBase()), address(ETH_USD), "ETH/USD first");
@@ -168,7 +173,7 @@ contract BandHookScriptsForkTest is Test {
         _poolEnv(hdxHollar, c0, c1, 60);
         _setS("SOURCE", "single");
         _setA("FEED", address(hdxUsd));
-        _setU("FEED_PRICES_TOKEN", hdxIs0 ? 0 : 1);
+        _setA("FEED_PRICES", address(hdx)); // the feed prices HDX, whichever way the addresses sort
         int24 expected = hdxIs0 ? _tickOf(1e6 * 1e18, 1e8 * 1e12) : _tickOf(1e8 * 1e12, 1e6 * 1e18);
         _setI("EXPECTED_TICK", expected);
         _params(3000, 20000, 7200, 1000, 16000, 500, 300);

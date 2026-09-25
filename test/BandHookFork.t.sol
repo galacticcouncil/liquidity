@@ -43,10 +43,8 @@ contract BandHookForkTest is Test {
         MockERC20 a = new MockERC20("Wrapped Ether", "WETH", 18);
         MockERC20 b = new MockERC20("Hollar", "HOLLAR", 18);
         (weth, hollar) = address(a) < address(b) ? (a, b) : (b, a);
-        bool wethIs0 = address(weth) < address(hollar);
-
-        // real feed; orient so the source prices pool token0 in token1
-        source = new ChainlinkSource(ETH_USD, !wethIs0, 18, 18);
+        // real feed, which prices WETH; the source works out the orientation itself
+        source = new ChainlinkSource(ETH_USD, address(weth), address(hollar));
 
         deployCodeTo("BandHook.sol:BandHook", abi.encode(MANAGER, address(this)), HOOK_ADDR);
         hook = BandHook(payable(HOOK_ADDR));

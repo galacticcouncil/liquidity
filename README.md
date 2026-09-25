@@ -11,7 +11,7 @@ Audit + fixes: PR #1 (merged 2026-09-18).
 ## Layout
 
 - `src/BandHook.sol` — the hook (owner-funded, open to third-party LPs); one deployment per pool
-- `src/sources/` — `ChainlinkSource` (single feed + invert + decimals), `RatioSource` (token0's USD feed ÷ token1's USD feed; the ETH/HDX source)
+- `src/sources/` — `ChainlinkSource` (one feed, built from the token it prices and the pool's other token), `RatioSource` (two USD feeds, each named with the token it prices; the ETH/HDX source). Both read the tokens' decimals and work out the orientation themselves
 - `script/00–03` — per pool: deploy its hook (CREATE2 salt-mined to the flag bits), set it up (source, expected-tick check, configure, initialize), fund, hand off ownership
 - `script/AnchorPool.s.sol` + `PoolAnchor.sol` — move a stale pool back onto its oracle before funding
 - `test/` — unit tests (ERC20 + native pools, audit regression suites) and fork tests against the live PoolManager, including the whole per-pool routine
@@ -27,8 +27,8 @@ file per pool from its example: `.env.eth-hollar`, `.env.hdx-hollar`,
 
 - bridged HOLLAR + HDX addresses (and confirmed decimals),
 - HDX/USD ManagedOracle (wormhole-direct receiver stack, `whm` repo). ETH/HDX
-  uses `RatioSource(ETH/USD, HDX/USD)`: token0's (ETH's) feed first, the other
-  way round the price is ~248,000 ticks off. No HDX/ETH oracle needed,
+  uses a `RatioSource` of ETH/USD and HDX/USD, each feed named with the token
+  it prices, in any order. No HDX/ETH oracle needed,
 - each pool's `EXPECTED_TICK`, from the market at launch (worked examples in
   the files); `01_SetupPool` refuses a source that disagrees with it,
 - owner multisig on Robinhood Chain — **must accept a plain ETH transfer**
