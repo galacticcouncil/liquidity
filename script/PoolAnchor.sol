@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 // Moves a pool's price onto a target in one transaction: one swap whose price limit is the target.
 // Across an empty stretch of price nothing trades, so an empty pool moves for free; liquidity from
-// others on the way is paid for, up to `maxIn`. The caller gets back whatever ETH is left.
+// others on the way is paid for, up to a cap per token. The caller gets back whatever ETH is left.
 
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
@@ -24,7 +24,6 @@ contract PoolAnchor is IUnlockCallback {
     IPoolManager public immutable manager;
 
     error NotManager();
-    error AlreadyAtTarget();
     error TargetNotReached();
     error TransferFailed();
 
@@ -34,14 +33,14 @@ contract PoolAnchor is IUnlockCallback {
 
     receive() external payable {}
 
-    /// @notice Move `key`'s price to `target` with one swap. `maxIn` caps what the swap may spend of
-    /// its input token; if that is not enough to reach the target, nothing happens. ERC20 amounts
-    /// are pulled from the caller, who must approve this contract first; native ETH comes from
-    /// msg.value, and the unused part is returned.
-    function anchor(PoolKey calldata key, uint160 target, uint256 maxIn) external payable {
+    /// @notice Move `key`'s price to `target` with one swap, or do nothing if it is already there.
+    /// The swap sells token0 when the price must fall and token1 when it must rise, and spends at
+    /// most `max0` or `max1` of it; if that is not enough to reach the target, nothing happens.
+    /// ERC20 amounts are pulled from the caller, who must approve this contract first; native ETH
+    /// comes from msg.value, and the unused part is returned.
+    function anchor(PoolKey calldata key, uint160 target, uint256 max0, uint256 max1) external payable {
         (uint160 current,,,) = manager.getSlot0(key.toId());
-        if (current == target) revert AlreadyAtTarget();
-        manager.unlock(abi.encode(msg.sender, key, target, maxIn));
+        if (current != target) manager.unlock(abi.encode(msg.sender, key, target, max0, max1));
         if (address(this).balance > 0) {
             (bool ok,) = msg.sender.call{value: address(this).balance}("");
             if (!ok) revert TransferFailed();
@@ -50,13 +49,14 @@ contract PoolAnchor is IUnlockCallback {
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(manager)) revert NotManager();
-        (address payer, PoolKey memory key, uint160 target, uint256 maxIn) =
-            abi.decode(data, (address, PoolKey, uint160, uint256));
+        (address payer, PoolKey memory key, uint160 target, uint256 max0, uint256 max1) =
+            abi.decode(data, (address, PoolKey, uint160, uint256, uint256));
         (uint160 current,,,) = manager.getSlot0(key.toId());
+        bool falls = target < current;
 
         manager.swap(
             key,
-            SwapParams({zeroForOne: target < current, amountSpecified: -maxIn.toInt256(), sqrtPriceLimitX96: target}),
+            SwapParams({zeroForOne: falls, amountSpecified: -(falls ? max0 : max1).toInt256(), sqrtPriceLimitX96: target}),
             ""
         );
         (uint160 reached,,,) = manager.getSlot0(key.toId());

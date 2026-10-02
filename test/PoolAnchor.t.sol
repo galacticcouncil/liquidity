@@ -125,6 +125,12 @@ contract PoolAnchorTest is Test {
         lpRouter.modifyLiquidity(key, ModifyLiquidityParams(0, 1200, 1e21, bytes32(0)), "");
     }
 
+    /// The stranger puts liquidity between tick -1200 and the pool's price (tick 0).
+    function strangerAddsLiquidityBelow() internal {
+        vm.prank(stranger);
+        lpRouter.modifyLiquidity(key, ModifyLiquidityParams(-1200, 0, 1e21, bytes32(0)), "");
+    }
+
     /// Mallory moves an empty pool's price onto `limit` with a 1-wei swap; nothing trades, so it is free.
     function malloryParksThePriceAt(PoolKey memory k, uint160 limit) internal {
         vm.prank(mallory);
@@ -146,7 +152,7 @@ contract PoolAnchorTest is Test {
         uint256 before1 = t1.balanceOf(address(this));
         uint160 target = TickMath.getSqrtPriceAtTick(1200);
 
-        helper.anchor(key, target,1e18);
+        helper.anchor(key, target, 1e18, 1e18);
 
         assertEq(price(id), target, "exactly on the target");
         assertLt(before0 - t0.balanceOf(address(this)), DUST, "only dust of token0");
@@ -157,7 +163,7 @@ contract PoolAnchorTest is Test {
     /// 2. The same downwards.
     function test_anchorsDown() public {
         uint160 target = TickMath.getSqrtPriceAtTick(-1200);
-        helper.anchor(key, target,1e18);
+        helper.anchor(key, target, 1e18, 1e18);
         assertEq(price(id), target);
     }
 
@@ -166,7 +172,7 @@ contract PoolAnchorTest is Test {
         uint256 ethBefore = address(this).balance;
         uint160 target = TickMath.getSqrtPriceAtTick(1200);
 
-        helper.anchor{value: 1 ether}(nativeKey, target,1e18);
+        helper.anchor{value: 1 ether}(nativeKey, target, 1e18, 1e18);
 
         assertEq(price(nativeKey.toId()), target, "exactly on the target");
         assertLt(ethBefore - address(this).balance, DUST, "all but dust of the ETH came back");
@@ -175,26 +181,27 @@ contract PoolAnchorTest is Test {
 
     // ---------- someone else's liquidity in the way
 
-    /// 4. With a stranger's liquidity on the path and a cap too small to cross it, nothing
-    /// happens: the whole anchor reverts and the price stays where it was.
+    /// 4. With a stranger's liquidity on the path and a token1 cap too small to cross it (the price
+    /// rises, so the anchor sells token1), nothing happens: the whole anchor reverts and the price
+    /// stays where it was.
     function test_liquidityOnThePath_capTooSmall_nothingHappens() public {
         strangerAddsLiquidityOnThePath();
         uint160 before = price(id);
 
         vm.expectRevert(PoolAnchor.TargetNotReached.selector);
-        helper.anchor(key, TickMath.getSqrtPriceAtTick(1200),1e15);
+        helper.anchor(key, TickMath.getSqrtPriceAtTick(1200), 1e18, 1e15);
 
         assertEq(price(id), before, "the price did not move");
     }
 
-    /// 5. With a big enough cap, the anchor crosses the stranger's liquidity and the caller pays
-    /// for it, which is why the caps exist.
+    /// 5. With a big enough token1 cap, the anchor crosses the stranger's liquidity and the caller
+    /// pays for it, which is why the caps exist.
     function test_liquidityOnThePath_callerPaysThrough() public {
         strangerAddsLiquidityOnThePath();
         uint256 before1 = t1.balanceOf(address(this));
         uint160 target = TickMath.getSqrtPriceAtTick(1200);
 
-        helper.anchor(key, target,1_000_000e18);
+        helper.anchor(key, target, 1e18, 1_000_000e18);
 
         assertEq(price(id), target, "on the target");
         assertGt(before1 - t1.balanceOf(address(this)), 1e18, "the caller paid to cross the stranger's liquidity");
@@ -202,10 +209,18 @@ contract PoolAnchorTest is Test {
 
     // ---------- the edges
 
-    /// 6. A pool already on the target: refused, there is nothing to do.
-    function test_alreadyAtTheTarget_isRefused() public {
-        vm.expectRevert(PoolAnchor.AlreadyAtTarget.selector);
-        helper.anchor(key, TickMath.getSqrtPriceAtTick(0),1e18);
+    /// 6. A pool already on the target: nothing happens and nothing is refused, so a batch that
+    /// anchors before it funds still goes through when nobody moved the price.
+    function test_alreadyAtTheTarget_doesNothing() public {
+        uint256 before0 = t0.balanceOf(address(this));
+        uint256 before1 = t1.balanceOf(address(this));
+        uint160 target = TickMath.getSqrtPriceAtTick(0);
+
+        helper.anchor(key, target, 1e18, 1e18);
+
+        assertEq(price(id), target, "still on the target");
+        assertEq(t0.balanceOf(address(this)), before0, "no token0 spent");
+        assertEq(t1.balanceOf(address(this)), before1, "no token1 spent");
     }
 
     /// 7. The point of it all: with the oracle 1200 ticks away the hook refuses to fund; after
@@ -215,7 +230,7 @@ contract PoolAnchorTest is Test {
         vm.expectRevert(BandHook.GuardTripped.selector);
         hook.fund(id, 100_000e18, 100_000e18);
 
-        helper.anchor(key, TickMath.getSqrtPriceAtTick(1200),1e18);
+        helper.anchor(key, TickMath.getSqrtPriceAtTick(1200), 1e18, 1e18);
         hook.fund(id, 100_000e18, 100_000e18);
         (,, int24 center, uint128 liq) = hook.core(id);
         assertEq(center, 1200, "funded around the oracle");
@@ -238,7 +253,7 @@ contract PoolAnchorTest is Test {
         hook.fund(id, 100_000e18, 100_000e18);
 
         uint160 target = TickMath.getSqrtPriceAtTick(1200);
-        helper.anchor(key, target,1e18);
+        helper.anchor(key, target, 1e18, 1e18);
 
         assertEq(price(id), target, "exactly on the target");
         hook.fund(id, 100_000e18, 100_000e18);
@@ -252,7 +267,7 @@ contract PoolAnchorTest is Test {
         malloryParksThePriceAt(key, CEILING);
         uint160 target = TickMath.getSqrtPriceAtTick(-1200);
 
-        helper.anchor(key, target,1e18);
+        helper.anchor(key, target, 1e18, 1e18);
 
         assertEq(price(id), target, "exactly on the target");
     }
@@ -263,7 +278,7 @@ contract PoolAnchorTest is Test {
         uint256 before0 = t0.balanceOf(address(this));
         uint256 before1 = t1.balanceOf(address(this));
 
-        helper.anchor(key, TickMath.getSqrtPriceAtTick(1200),1e18);
+        helper.anchor(key, TickMath.getSqrtPriceAtTick(1200), 1e18, 1e18);
 
         assertEq(t0.balanceOf(address(this)), before0, "no token0 spent");
         assertEq(t1.balanceOf(address(this)), before1, "no token1 spent");
@@ -276,10 +291,47 @@ contract PoolAnchorTest is Test {
         uint256 ethBefore = address(this).balance;
         uint160 target = TickMath.getSqrtPriceAtTick(1200);
 
-        helper.anchor{value: 1 ether}(nativeKey, target,1e18);
+        helper.anchor{value: 1 ether}(nativeKey, target, 1e18, 1e18);
 
         assertEq(price(nativeKey.toId()), target, "exactly on the target");
         assertEq(address(this).balance, ethBefore, "all the ETH came back");
         assertEq(address(helper).balance, 0, "the helper keeps no ETH");
+    }
+
+    // ---------- one cap per token, and nothing to do (review issue 2)
+
+    /// 13. An ETH pool already on the target: the ETH sent along comes back in full.
+    function test_nativePoolAlreadyAtTheTarget_returnsAllTheEth() public {
+        uint256 ethBefore = address(this).balance;
+
+        helper.anchor{value: 1 ether}(nativeKey, TickMath.getSqrtPriceAtTick(0), 1e18, 1e18);
+
+        assertEq(address(this).balance, ethBefore, "all the ETH came back");
+        assertEq(address(helper).balance, 0, "the helper keeps no ETH");
+    }
+
+    /// 14. The price must fall through a stranger's liquidity, so the anchor sells token0: token0's
+    /// cap is the one that counts, and too small a cap means nothing happens, whatever token1's cap.
+    function test_priceFalls_token0CapTooSmall_nothingHappens() public {
+        strangerAddsLiquidityBelow();
+        uint160 before = price(id);
+
+        vm.expectRevert(PoolAnchor.TargetNotReached.selector);
+        helper.anchor(key, TickMath.getSqrtPriceAtTick(-1200), 1e15, 1_000_000e18);
+
+        assertEq(price(id), before, "the price did not move");
+    }
+
+    /// 15. The same with a big token0 cap: the anchor pays through in token0, and token1's cap of
+    /// 1 wei does not stop it.
+    function test_priceFalls_paysInToken0() public {
+        strangerAddsLiquidityBelow();
+        uint256 before0 = t0.balanceOf(address(this));
+        uint160 target = TickMath.getSqrtPriceAtTick(-1200);
+
+        helper.anchor(key, target, 1_000_000e18, 1);
+
+        assertEq(price(id), target, "on the target");
+        assertGt(before0 - t0.balanceOf(address(this)), 1e18, "the caller paid in token0");
     }
 }

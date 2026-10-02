@@ -47,7 +47,7 @@ contract AnchorPool is PoolScript {
             return;
         }
 
-        _anchor(key, target, target < current);
+        _anchor(key, target);
 
         (, poolTick,,) = MANAGER.getSlot0(id);
         uint256 afterGap = _absDiff(poolTick, oracleTick);
@@ -55,7 +55,7 @@ contract AnchorPool is PoolScript {
         require(afterGap <= uint256(int256(guard)), "anchored pool is still outside the guard");
     }
 
-    function _anchor(PoolKey memory key, uint160 target, bool priceFalls) internal {
+    function _anchor(PoolKey memory key, uint160 target) internal {
         uint256 max0 = vm.envUint("ANCHOR_MAX0");
         uint256 max1 = vm.envUint("ANCHOR_MAX1");
         bool native = key.currency0.isAddressZero();
@@ -64,7 +64,7 @@ contract AnchorPool is PoolScript {
         PoolAnchor helper = new PoolAnchor(MANAGER);
         if (!native) IERC20Approve(Currency.unwrap(key.currency0)).approve(address(helper), max0);
         IERC20Approve(Currency.unwrap(key.currency1)).approve(address(helper), max1);
-        helper.anchor{value: native ? max0 : 0}(key, target, priceFalls ? max0 : max1);
+        helper.anchor{value: native ? max0 : 0}(key, target, max0, max1);
         vm.stopBroadcast();
     }
 }
