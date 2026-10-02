@@ -42,10 +42,10 @@ Per pool, run `01_SetupPool` and `02_Fund` back to back. Until the first
 limit lands exactly on that limit and costs only gas. `fund` refuses a pool
 further than `guardTicks` from the oracle (`GuardTripped`), so a move like
 that only delays the launch; nothing is lost. If `01_SetupPool` or `02_Fund`
-says the pool is off the oracle, run `AnchorPool` (tiny straddling position,
-one swap with `sqrtPriceLimitX96` at the oracle price, burn — a little of each
-token, capped by `ANCHOR_MAX0/1`), then `02_Fund` again, and repeat if someone
-keeps moving it. A move that stays inside the guard is not refused: the first
+says the pool is off the oracle, run `AnchorPool` (one swap with
+`sqrtPriceLimitX96` at the oracle price: free on an empty pool, capped by
+`ANCHOR_MAX0/1` if others' liquidity is in the way), then `02_Fund` again,
+and repeat if someone keeps moving it. A move that stays inside the guard is not refused: the first
 fund is then placed while the pool sits up to `guardTicks` off the oracle, and
 the mover can trade it back for a small profit (measured: under 2 bps of the
 fund on ETH/HOLLAR at guard 200).

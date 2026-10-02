@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// Moves a pool that drifted off its oracle back onto it before funding, with the recipe from
-// the Gamma launch (tiny straddling position, swap to the oracle price, burn), through
-// PoolAnchor. Only needed when 01_SetupPool or 02_Fund says the pool is off the oracle.
+// Moves a pool that drifted off its oracle back onto it before funding, with one swap to the
+// oracle price through PoolAnchor. Only needed when 01_SetupPool or 02_Fund says the pool is off
+// the oracle.
 //
 //   set -a; source .env.hdx-hollar; set +a
 //   forge script script/AnchorPool.s.sol --rpc-url robinhood --broadcast
 //
-// Spends a little of both tokens, never more than ANCHOR_MAX0 / ANCHOR_MAX1 (raw units), which
-// it approves or, for native ETH, sends and gets back unused. ANCHOR_LIQUIDITY sizes the tiny
-// position. Any liquidity from others on the way costs more; past the caps nothing happens.
+// An empty pool moves for free. Liquidity from others on the way is paid for, never more than
+// ANCHOR_MAX0 / ANCHOR_MAX1 (raw units), which it approves or, for native ETH, sends and gets
+// back unused; past the caps nothing happens.
 
 import {console2} from "forge-std/Script.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
@@ -64,9 +64,7 @@ contract AnchorPool is PoolScript {
         PoolAnchor helper = new PoolAnchor(MANAGER);
         if (!native) IERC20Approve(Currency.unwrap(key.currency0)).approve(address(helper), max0);
         IERC20Approve(Currency.unwrap(key.currency1)).approve(address(helper), max1);
-        helper.anchor{value: native ? max0 : 0}(
-            key, target, uint128(vm.envUint("ANCHOR_LIQUIDITY")), priceFalls ? max0 : max1
-        );
+        helper.anchor{value: native ? max0 : 0}(key, target, priceFalls ? max0 : max1);
         vm.stopBroadcast();
     }
 }

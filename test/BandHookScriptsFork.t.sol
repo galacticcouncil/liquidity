@@ -181,7 +181,6 @@ contract BandHookScriptsForkTest is Test {
         _setU("FUND_AMOUNT1", hdxIs0 ? 10_000e18 : 1_000_000e12);
         _setU("ANCHOR_MAX0", 1e18);
         _setU("ANCHOR_MAX1", 1e18);
-        _setU("ANCHOR_LIQUIDITY", 1e12);
 
         vm.prank(stranger);
         MANAGER.initialize(hdxHollarKey, TickMath.getSqrtPriceAtTick(expected + 2000));
