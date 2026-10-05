@@ -9,8 +9,8 @@ pragma solidity 0.8.26;
 //   forge script script/01_SetupPool.s.sol --rpc-url robinhood --broadcast
 //
 // Caller must be the hook's owner. If someone initialized the pool first, the script checks
-// its price against the oracle instead of initializing: further than GUARD_TICKS away, it
-// says so, and the pool must go through AnchorPool before 02_Fund.
+// its price against the oracle instead of initializing and says how far off it is; the SafeFund
+// batch puts it back on the oracle before funding.
 
 import {console2} from "forge-std/Script.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
@@ -124,13 +124,13 @@ contract SetupPool is PoolScript {
         });
     }
 
-    /// @dev Somebody initialized the pool before us. Within the guard it can be funded as is;
-    /// further out, funding would be refused, so the pool must be anchored first.
+    /// @dev Somebody initialized the pool before us. The SafeFund batch anchors it onto the oracle
+    /// before it funds, wherever it sits, so this only reports how far off it is.
     function _reportExistingPool(int24 poolTick, int24 oracleTick) internal view {
         uint256 gap = _absDiff(poolTick, oracleTick);
         console2.log("pool was already initialized; ticks from the oracle:", gap);
         if (gap > vm.envUint("GUARD_TICKS")) {
-            console2.log("OFF THE ORACLE BY MORE THAN GUARD_TICKS: run AnchorPool before 02_Fund");
+            console2.log("OFF THE ORACLE BY MORE THAN GUARD_TICKS: the SafeFund batch puts it back before funding");
         }
     }
 }

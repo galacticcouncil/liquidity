@@ -19,15 +19,16 @@ import {RatioSource} from "../src/sources/RatioSource.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 import {DeployBandHook} from "../script/00_DeployBandHook.s.sol";
 import {SetupPool} from "../script/01_SetupPool.s.sol";
-import {FundPool} from "../script/02_Fund.s.sol";
 import {HandOff} from "../script/03_HandOff.s.sol";
-import {AnchorPool} from "../script/AnchorPool.s.sol";
+import {SafeFund} from "../script/SafeFund.s.sol";
 import {MockAggregator} from "./mocks/SourceMocks.sol";
+import {SafeLike} from "./mocks/SafeLike.sol";
 
 /// The launch routine end to end, with the real scripts, on a fork of Robinhood Chain: three
-/// pools on three hooks, ETH/HDX priced through RatioSource, one pool anchored before funding.
-/// One test on purpose: the scripts read process-wide environment variables, which tests
-/// running in parallel would overwrite under each other.
+/// pools on three hooks, each handed to the Safe before any funding and funded by the batch file
+/// SafeFund writes; ETH/HDX priced through RatioSource; HDX/HOLLAR initialized off the oracle by a
+/// stranger and put back by its batch. One test on purpose: the scripts read process-wide
+/// environment variables, which tests running in parallel would overwrite under each other.
 contract BandHookScriptsForkTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -39,7 +40,7 @@ contract BandHookScriptsForkTest is Test {
     uint256 constant DEPLOYER_PK = uint256(keccak256("bandhook launch routine fork test deployer"));
 
     address deployer;
-    address multisig = makeAddr("multisig");
+    SafeLike safe; // stands in for the owner multisig: a contract that runs batches
     address stranger = makeAddr("stranger");
     MockERC20 hollar; // bridged HOLLAR does not exist yet: 18 decimals
     MockERC20 hdx; // bridged HDX does not exist yet: 12 decimals, as on Hydration
@@ -57,17 +58,18 @@ contract BandHookScriptsForkTest is Test {
         vm.createSelectFork("robinhood");
         deployer = vm.addr(DEPLOYER_PK);
         assertEq(deployer.code.length, 0, "the deployer is a plain account on the fork");
-        assertEq(multisig.code.length, 0, "and so is the multisig stand-in");
+        safe = new SafeLike();
         hollar = new MockERC20("Hollar", "HOLLAR", 18);
         hdx = new MockERC20("HydraDX", "HDX", 12);
         hdxUsd = new MockAggregator(8, 1e6);
         (, int256 answer,,,) = ETH_USD.latestRoundData();
         ethAnswer = uint256(answer);
-        vm.deal(deployer, 100 ether);
-        hollar.mint(deployer, 10_000_000e18);
-        hdx.mint(deployer, 100_000_000e12);
+        vm.deal(deployer, 1 ether); // gas only: the capital sits in the Safe
+        vm.deal(address(safe), 100 ether);
+        hollar.mint(address(safe), 10_000_000e18);
+        hdx.mint(address(safe), 100_000_000e12);
         vm.setEnv("PRIVATE_KEY", vm.toString(DEPLOYER_PK));
-        vm.setEnv("NEW_OWNER", vm.toString(multisig));
+        vm.setEnv("NEW_OWNER", vm.toString(address(safe)));
     }
 
     function test_launchRoutine_threePoolsOnThreeHooks() public {
@@ -76,7 +78,7 @@ contract BandHookScriptsForkTest is Test {
         _ethHdxRefusesMispairedFeedsThenFunds();
         _hdxHollarInitializedByAStrangerIsAnchoredThenFunded();
         _withdrawingOnePoolLeavesTheOthersUntouched();
-        _handEachHookToTheMultisig();
+        _theSafeOwnsEveryHook();
     }
 
     // ---------- the phases
@@ -98,7 +100,8 @@ contract BandHookScriptsForkTest is Test {
 
     /// ETH/HOLLAR: one Chainlink feed. An expected tick worked out as if HOLLAR had 8 decimals
     /// (as Wormhole wraps) is refused before anything is configured, because the source reads the
-    /// token's real 18; the right one initializes the pool at the oracle price, and it is funded.
+    /// token's real 18; the right one initializes the pool at the oracle price. The hook goes to
+    /// the Safe, and the Safe's batch funds it.
     function _setUpAndFundEthHollar() internal {
         ethHollarKey = _key(ethHollar, address(0), address(hollar), 10);
         _poolEnv(ethHollar, address(0), address(hollar), 10);
@@ -108,6 +111,8 @@ contract BandHookScriptsForkTest is Test {
         _params(800, 10000, 100800, 700, 11000, 350, 200);
         _setU("FUND_AMOUNT0", 10 ether);
         _setU("FUND_AMOUNT1", 10 * ethAnswer * 1e10);
+        _setU("ANCHOR_MAX0", 1e15);
+        _setU("ANCHOR_MAX1", 1e18);
 
         _setI("EXPECTED_TICK", _tickOf(ethAnswer, 1e18)); // raw HOLLAR per raw ETH at 8 decimals
         SetupPool setup = new SetupPool();
@@ -121,14 +126,15 @@ contract BandHookScriptsForkTest is Test {
 
         _setI("EXPECTED_TICK", _tickOf(ethAnswer, 1e8)); // raw HOLLAR per raw ETH at 18 decimals
         setup.run();
-        new FundPool().run();
+        _handToTheSafe(ethHollar);
+        _fundThroughTheSafe(ethHollarKey);
         (,,, uint128 liq) = ethHollar.core(ethHollarKey.toId());
         assertGt(liq, 0, "ETH/HOLLAR funded");
     }
 
     /// ETH/HDX: feeds named with the wrong tokens are refused before anything is configured.
     /// Named rightly, here HDX first to show the order no longer matters, the source puts ETH/USD
-    /// on top (ETH is token0), and the pool is funded.
+    /// on top (ETH is token0); the hook goes to the Safe, and the Safe's batch funds it.
     function _ethHdxRefusesMispairedFeedsThenFunds() internal {
         ethHdxKey = _key(ethHdx, address(0), address(hdx), 60);
         _poolEnv(ethHdx, address(0), address(hdx), 60);
@@ -137,6 +143,8 @@ contract BandHookScriptsForkTest is Test {
         _params(3000, 20000, 100800, 1000, 16000, 500, 300);
         _setU("FUND_AMOUNT0", 5 ether);
         _setU("FUND_AMOUNT1", 5 * ethAnswer * 1e12 / 1e6);
+        _setU("ANCHOR_MAX0", 1e15);
+        _setU("ANCHOR_MAX1", 1e18);
 
         _setA("FEED_A", address(hdxUsd)); // the HDX feed named with ETH, and the other way round
         _setA("FEED_A_PRICES", address(0));
@@ -162,14 +170,15 @@ contract BandHookScriptsForkTest is Test {
         new SetupPool().run();
         (IPriceSource source,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(RatioSource(address(source)).feedBase()), address(ETH_USD), "ETH/USD first");
-        new FundPool().run();
+        _handToTheSafe(ethHdx);
+        _fundThroughTheSafe(ethHdxKey);
         (,,, uint128 liq) = ethHdx.core(ethHdxKey.toId());
         assertGt(liq, 0, "ETH/HDX funded");
     }
 
     /// HDX/HOLLAR: a stranger initialized the pool first, 2,000 ticks off the oracle. Setup
-    /// configures it without moving it, funding is refused, AnchorPool moves it back, and then
-    /// funding goes through.
+    /// configures it without moving it; the hook goes to the Safe, and the Safe's one batch puts the
+    /// price back on the oracle and funds it.
     function _hdxHollarInitializedByAStrangerIsAnchoredThenFunded() internal {
         bool hdxIs0 = address(hdx) < address(hollar);
         (address c0, address c1) = hdxIs0 ? (address(hdx), address(hollar)) : (address(hollar), address(hdx));
@@ -194,31 +203,27 @@ contract BandHookScriptsForkTest is Test {
         assertTrue(address(source) != address(0), "configured");
         assertGt(_gap(hdxHollarKey, expected), 300, "setup does not move the price");
 
-        FundPool fund = new FundPool();
-        vm.expectRevert(bytes("pool is further from the oracle than its guard: run AnchorPool first"));
-        fund.run();
-
-        new AnchorPool().run();
-        assertLe(_gap(hdxHollarKey, expected), 1, "anchored onto the oracle");
-
-        new FundPool().run();
+        _handToTheSafe(hdxHollar);
+        _fundThroughTheSafe(hdxHollarKey);
+        assertLe(_gap(hdxHollarKey, expected), 1, "put back on the oracle by the batch");
         (,,, uint128 liq) = hdxHollar.core(hdxHollarKey.toId());
         assertGt(liq, 0, "HDX/HOLLAR funded");
     }
 
-    /// Withdrawing ETH/HOLLAR returns its tokens to the deployer and leaves the other two pools'
-    /// positions exactly as they were: each pool's tokens sit behind its own hook.
+    /// The Safe withdraws ETH/HOLLAR: its tokens come back to the Safe, and the other two pools'
+    /// positions stay exactly as they were: each pool's tokens sit behind its own hook.
     function _withdrawingOnePoolLeavesTheOthersUntouched() internal {
         (int24 lo, int24 hi,, uint128 ethHdxLiq) = ethHdx.core(ethHdxKey.toId());
         (,,, uint128 hdxHollarLiq) = hdxHollar.core(hdxHollarKey.toId());
-        uint256 ethBefore = deployer.balance;
-        uint256 hollarBefore = hollar.balanceOf(deployer);
+        uint256 ethBefore = address(safe).balance;
+        uint256 hollarBefore = hollar.balanceOf(address(safe));
 
-        vm.prank(deployer);
-        ethHollar.withdraw(ethHollarKey.toId());
+        SafeFund.Call[] memory w = new SafeFund.Call[](1);
+        w[0] = SafeFund.Call(address(ethHollar), 0, abi.encodeCall(BandHook.withdraw, (ethHollarKey.toId())));
+        safe.execute(w);
 
-        assertGt(deployer.balance, ethBefore, "the pool's ETH came back");
-        assertGt(hollar.balanceOf(deployer), hollarBefore, "the pool's HOLLAR came back");
+        assertGt(address(safe).balance, ethBefore, "the pool's ETH came back to the Safe");
+        assertGt(hollar.balanceOf(address(safe)), hollarBefore, "the pool's HOLLAR came back to the Safe");
         (,,, uint128 ethHdxAfter) = ethHdx.core(ethHdxKey.toId());
         (,,, uint128 hdxHollarAfter) = hdxHollar.core(hdxHollarKey.toId());
         assertEq(ethHdxAfter, ethHdxLiq, "ETH/HDX untouched");
@@ -227,21 +232,49 @@ contract BandHookScriptsForkTest is Test {
         assertEq(held, ethHdxLiq, "and the PoolManager still holds it");
     }
 
-    /// 03 once per pool: each hook's pending owner becomes the multisig, which accepts each one.
-    function _handEachHookToTheMultisig() internal {
+    /// At the end the Safe owns every hook and the deployer none.
+    function _theSafeOwnsEveryHook() internal view {
         BandHook[3] memory hooks = [ethHollar, hdxHollar, ethHdx];
         for (uint256 i; i < 3; i++) {
-            _setA("HOOK", address(hooks[i]));
-            new HandOff().run();
-            assertEq(hooks[i].pendingOwner(), multisig, "handed off");
-            vm.prank(multisig);
-            hooks[i].acceptOwnership();
-            assertEq(hooks[i].owner(), multisig, "the multisig owns it");
+            assertEq(hooks[i].owner(), address(safe), "the Safe owns it");
             assertEq(hooks[i].pendingOwner(), address(0), "nothing pending");
         }
     }
 
     // ---------- helpers
+
+    /// 03 for one pool, then the Safe accepts: from here only the Safe can fund or withdraw.
+    function _handToTheSafe(BandHook hook) internal {
+        _setA("HOOK", address(hook));
+        new HandOff().run();
+        assertEq(hook.pendingOwner(), address(safe), "handed off");
+        SafeFund.Call[] memory a = new SafeFund.Call[](1);
+        a[0] = SafeFund.Call(address(hook), 0, abi.encodeCall(BandHook.acceptOwnership, ()));
+        safe.execute(a);
+        assertEq(hook.owner(), address(safe), "the Safe owns it");
+    }
+
+    /// SafeFund writes the batch file; the Safe runs exactly what the file says, in one transaction.
+    function _fundThroughTheSafe(PoolKey memory key) internal {
+        new SafeFund().run();
+        string memory path = string.concat("broadcast/safe-batches/", vm.toString(PoolId.unwrap(key.toId())), ".json");
+        safe.execute(_batchFromFile(vm.readFile(path)));
+    }
+
+    /// The calls listed in a Safe Transaction Builder file, in order.
+    function _batchFromFile(string memory json) internal view returns (SafeFund.Call[] memory c) {
+        uint256 n;
+        while (vm.keyExistsJson(json, string.concat(".transactions[", vm.toString(n), "]"))) n++;
+        c = new SafeFund.Call[](n);
+        for (uint256 i; i < n; i++) {
+            string memory t = string.concat(".transactions[", vm.toString(i), "]");
+            c[i] = SafeFund.Call(
+                vm.parseJsonAddress(json, string.concat(t, ".to")),
+                vm.parseUint(vm.parseJsonString(json, string.concat(t, ".value"))),
+                vm.parseJsonBytes(json, string.concat(t, ".data"))
+            );
+        }
+    }
 
     function _key(BandHook hook, address c0, address c1, int24 spacing) internal pure returns (PoolKey memory) {
         return

@@ -23,22 +23,7 @@ import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 import {PoolAnchor} from "../script/PoolAnchor.sol";
 import {SafeFund} from "../script/SafeFund.s.sol";
 import {MockPriceSource} from "./mocks/MockPriceSource.sol";
-
-/// Stands in for the Safe: owns the hook and runs a batch of calls in one transaction, all or nothing.
-contract SafeLike {
-    function execute(SafeFund.Call[] calldata calls) external {
-        for (uint256 i; i < calls.length; i++) {
-            (bool ok, bytes memory ret) = calls[i].to.call{value: calls[i].value}(calls[i].data);
-            if (!ok) {
-                assembly {
-                    revert(add(ret, 32), mload(ret))
-                }
-            }
-        }
-    }
-
-    receive() external payable {}
-}
+import {SafeLike} from "./mocks/SafeLike.sol";
 
 contract SafeFundTest is Test {
     using PoolIdLibrary for PoolKey;

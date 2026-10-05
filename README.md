@@ -12,8 +12,9 @@ Audit + fixes: PR #1 (merged 2026-09-18).
 
 - `src/BandHook.sol` — the hook (owner-funded, open to third-party LPs); one deployment per pool
 - `src/sources/` — `ChainlinkSource` (one feed, built from the token it prices and the pool's other token), `RatioSource` (two USD feeds, each named with the token it prices; the ETH/HDX source). Both read the tokens' decimals and work out the orientation themselves
-- `script/00–03` — per pool: deploy its hook (CREATE2 salt-mined to the flag bits), set it up (source, expected-tick check, configure, initialize), fund, hand off ownership
-- `script/AnchorPool.s.sol` + `PoolAnchor.sol` — move a stale pool back onto its oracle before funding
+- `script/00`, `01`, `03` — per pool: deploy its hook (CREATE2 salt-mined to the flag bits), set it up (source, expected-tick check, configure, initialize), hand it to the Safe
+- `script/SafeFund.s.sol` — writes the Safe batch that anchors the pool price onto the oracle and funds it in one transaction
+- `script/PoolAnchor.sol` — the helper the batch calls to move the pool price onto the oracle
 - `test/` — unit tests (ERC20 + native pools, audit regression suites) and fork tests against the live PoolManager, including the whole per-pool routine
 
 ## Prerequisites
@@ -36,19 +37,24 @@ file per pool from its example: `.env.eth-hollar`, `.env.hdx-hollar`,
 
 ## Run order
 
-Per pool, run `01_SetupPool` and `02_Fund` back to back. Until the first
-`fund`, and again after a full `withdraw`, the pool holds no liquidity, and
-**anyone can move an empty pool's price for free**: a 1-wei swap with a price
-limit lands exactly on that limit and costs only gas. `fund` refuses a pool
-further than `guardTicks` from the oracle (`GuardTripped`), so a move like
-that only delays the launch; nothing is lost. If `01_SetupPool` or `02_Fund`
-says the pool is off the oracle, run `AnchorPool` (one swap with
-`sqrtPriceLimitX96` at the oracle price: free on an empty pool, capped by
-`ANCHOR_MAX0/1` if others' liquidity is in the way), then `02_Fund` again,
-and repeat if someone keeps moving it. A move that stays inside the guard is not refused: the first
-fund is then placed while the pool sits up to `guardTicks` off the oracle, and
-the mover can trade it back for a small profit (measured: under 2 bps of the
-fund on ETH/HOLLAR at guard 200).
+Per pool: `00`, `01`, then `03` hands the hook to the Safe **before any
+funding**, and the Safe accepts. The Safe holds the capital; the deploy key
+never does. `SafeFund` then writes one batch for the Safe: approve, anchor,
+approve, fund.
+
+Until the first `fund`, and again after a full `withdraw`, the pool holds no
+liquidity, and **anyone can move an empty pool's price for free**: a 1-wei
+swap with a price limit lands exactly on that limit and costs only gas. The
+batch's anchor puts the price back exactly on the oracle and `fund` deposits
+in the same transaction, so nobody can move it in between; when nothing moved
+it, the anchor does nothing. The anchor is free on an empty pool and capped by
+`ANCHOR_MAX0/1` if others' liquidity is in the way.
+
+Sign and execute the batch soon after writing it: it targets the oracle price
+at writing time, and if the oracle has since moved further than `guardTicks`,
+`fund` refuses and the whole batch is undone. Write it again. Try the import
+once on a rehearsal Safe first: the file is written for the Safe app's
+Transaction Builder.
 
 ```sh
 forge test                                   # all green, incl. fork tests (uses the "robinhood" rpc alias)
@@ -58,12 +64,12 @@ set -a; source .env.eth-hollar; set +a
 forge script script/00_DeployBandHook.s.sol --rpc-url robinhood --broadcast  # this pool's hook; put the printed HOOK in .env.eth-hollar
 set -a; source .env.eth-hollar; set +a                                        # reload with HOOK set
 forge script script/01_SetupPool.s.sol --rpc-url robinhood --broadcast       # source, expected-tick check, configure, initialize at the oracle price
-forge script script/AnchorPool.s.sol --rpc-url robinhood --broadcast         # only if 01 or 02 says the pool is off the oracle; then 02 again
-forge script script/02_Fund.s.sol --rpc-url robinhood --broadcast            # FUND_AMOUNT0/1, immediately after 01
-forge script script/03_HandOff.s.sol --rpc-url robinhood --broadcast         # then the multisig calls acceptOwnership() on this hook
+forge script script/03_HandOff.s.sol --rpc-url robinhood --broadcast         # before any funding; then the Safe calls acceptOwnership() on this hook
+forge script script/SafeFund.s.sol --rpc-url robinhood --broadcast           # once the Safe owns it: writes broadcast/safe-batches/<pool id>.json
+# import that file in the Safe app (Transaction Builder), check each call, sign, execute
 ```
 
-Handover verification, for every hook: after `acceptOwnership`, assert `owner` is the multisig,
+Handover verification, for every hook, before the Safe funds it: assert `owner` is the Safe,
 `pendingOwner` is zero, and the deploy key holds no role of any kind.
 
 ## Operator notes
@@ -75,7 +81,7 @@ means and what to do:
 |---|---|---|
 | `StaleOracle` | price source older than `staleAfter`, zero, or dated in the future | fix the feed/pipeline; nothing moved. Swaps continue at the floor fee |
 | `StaleOracle` | price source failing: it reverts, runs out of its 200k gas, or answers malformed | nothing moved. Swaps continue at the **fee cap**; the pool recovers by itself when the source answers again, or replace it with `setSource` |
-| `GuardTripped` | pool price > `guardTicks` from the oracle | wait for arbitrage to align the pool, or run `AnchorPool` (empty pool). Never force capital against an unverified price |
+| `GuardTripped` | pool price > `guardTicks` from the oracle | funded pool: wait for arbitrage to align it. Empty pool: write and run the SafeFund batch again, its anchor puts it back. Never force capital against an unverified price |
 | `EmptyBand` | nothing at all could be placed: the hook holds no tokens for this pool. A full band exit no longer causes it; the held token goes into the one-sided limit | fund the pool; nothing moved |
 
 `fund(id, 0, 0)` is the owner's **forced recenter**: it pulls nothing, skips

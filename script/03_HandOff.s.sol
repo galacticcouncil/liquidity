@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 // Begins the 2-step ownership transfer of one pool's hook to the final owner (multisig).
-// Run once per pool, with that pool's settings loaded; the multisig must then call
-// acceptOwnership() on each hook itself.
+// Run once per pool, right after 01 and before any funding, with that pool's settings loaded;
+// the multisig must then call acceptOwnership() on each hook itself, and funds it with SafeFund.
 //
 //   set -a; source .env.eth-hollar; set +a
 //   forge script script/03_HandOff.s.sol --rpc-url robinhood --broadcast
