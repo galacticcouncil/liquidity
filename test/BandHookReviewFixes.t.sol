@@ -152,6 +152,24 @@ contract BandHookReviewFixesTest is Test {
         hook.setEnabled(id, false);
     }
 
+    // ---------- issue 11: the guard is at most 4x its own minimum
+
+    /// At a 1% cap the minimum is 161 (dead band 111 + margin 50), so the ceiling is 644.
+    function test_guardAboveFourTimesItsMinimum_isRefused() public {
+        BandHook.PoolConfig memory cfg = _cfg(IPriceSource(address(source)));
+        cfg.feeCap = 10000;
+        cfg.guardTicks = 645;
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.configure(_key(20), cfg);
+    }
+
+    function test_guardAtFourTimesItsMinimum_isAccepted() public {
+        BandHook.PoolConfig memory cfg = _cfg(IPriceSource(address(source)));
+        cfg.feeCap = 10000;
+        cfg.guardTicks = 644;
+        hook.configure(_key(20), cfg);
+    }
+
     // ---------- helpers
 
     function _key(int24 spacing) internal view returns (PoolKey memory) {

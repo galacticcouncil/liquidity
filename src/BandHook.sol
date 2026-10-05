@@ -108,6 +108,9 @@ contract BandHook is IUnlockCallback {
     /// @dev Ticks the guard must clear beyond the fee cap's dead band. The oracle can trail the
     /// market by about this much: Chainlink ETH/USD only updates on a 0.5% move.
     uint256 internal constant GUARD_MARGIN_TICKS = 50;
+    /// @dev The guard may be at most this many times its own minimum (dead band plus margin): a
+    /// wider guard lets anyone have the book placed further from the oracle.
+    uint256 internal constant MAX_GUARD_MULT = 4;
     // in-swap recenter gas: the least an attempt starts with (the dearest measured attempt is about
     // 555k cold, about 600k with tokens donated to the hook), the most it may spend, and what is
     // always kept back: a route needing a little under TAIL_GAS after this pool always goes through
@@ -285,6 +288,9 @@ contract BandHook is IUnlockCallback {
         if (fee >= LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
         uint256 deadBandTicks = fee * 10_000 / (LPFeeLibrary.MAX_LP_FEE - fee);
         if (uint256(int256(cfg.guardTicks)) <= deadBandTicks + GUARD_MARGIN_TICKS) revert BadConfig();
+        if (uint256(int256(cfg.guardTicks)) > MAX_GUARD_MULT * (deadBandTicks + GUARD_MARGIN_TICKS)) {
+            revert BadConfig();
+        }
         if (int256(cfg.halfBandTicks) * MAX_EXTENSION_MULT > TickMath.MAX_TICK) revert BadConfig();
         if (cfg.backstopBps > 10_000) revert BadConfig();
         if (cfg.backstopHalfTicks != 0 && cfg.backstopHalfTicks < cfg.halfBandTicks) revert BadConfig();
