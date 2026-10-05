@@ -64,7 +64,7 @@ contract SetupPool is PoolScript {
     /// @dev Every feed is named with the token it prices, by address, and the source works out the
     /// orientation and the decimals itself. SOURCE=single reads FEED, which prices FEED_PRICES in
     /// the pool's other, USD-stable token. SOURCE=ratio divides two USD feeds, FEED_A (prices
-    /// FEED_A_PRICES) and FEED_B (prices FEED_B_PRICES), named in any order.
+    /// FEED_A_PRICES, may be FEED_A_MAX_AGE_S old) and FEED_B (likewise), named in any order.
     function _deploySource(PoolKey memory key) internal returns (IPriceSource) {
         address c0 = Currency.unwrap(key.currency0);
         address c1 = Currency.unwrap(key.currency1);
@@ -78,7 +78,9 @@ contract SetupPool is PoolScript {
             );
             IAggregatorV3 feedA = IAggregatorV3(vm.envAddress("FEED_A"));
             IAggregatorV3 feedB = IAggregatorV3(vm.envAddress("FEED_B"));
-            return IPriceSource(address(new RatioSource(tokenA, feedA, tokenB, feedB)));
+            uint256 maxAgeA = vm.envUint("FEED_A_MAX_AGE_S");
+            uint256 maxAgeB = vm.envUint("FEED_B_MAX_AGE_S");
+            return IPriceSource(address(new RatioSource(tokenA, feedA, maxAgeA, tokenB, feedB, maxAgeB)));
         }
         require(kind == keccak256("single"), "SOURCE must be single or ratio");
         address priced = vm.envAddress("FEED_PRICES");

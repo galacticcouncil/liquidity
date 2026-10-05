@@ -15,6 +15,8 @@ contract RatioSourceTest is Test {
     address hdx; // 12 decimals, as on Hydration; the pool's token1
     MockAggregator ethUsd; // prices ETH in USD
     MockAggregator hdxUsd; // prices HDX in USD
+    uint256 constant ETH_MAX_AGE = 28 hours; // ETH/USD updates on a 0.5% move or every 24h
+    uint256 constant HDX_MAX_AGE = 2 hours; // HDX/USD heartbeats every 30 min
 
     function setUp() public {
         vm.warp(1_000_000);
@@ -24,7 +26,7 @@ contract RatioSourceTest is Test {
     }
 
     function _ethHdx() internal returns (RatioSource) {
-        return new RatioSource(ETH, IAggregatorV3(address(ethUsd)), hdx, IAggregatorV3(address(hdxUsd)));
+        return new RatioSource(ETH, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE, hdx, IAggregatorV3(address(hdxUsd)), HDX_MAX_AGE);
     }
 
     /// 1. 240,000 HDX per ETH: in raw units, 0.24 raw HDX per raw ETH.
@@ -35,7 +37,7 @@ contract RatioSourceTest is Test {
 
     /// 2. The same two pairs named the other way round give the same source.
     function test_theOrderOfThePairs_doesNotMatter() public {
-        RatioSource hdxFirst = new RatioSource(hdx, IAggregatorV3(address(hdxUsd)), ETH, IAggregatorV3(address(ethUsd)));
+        RatioSource hdxFirst = new RatioSource(hdx, IAggregatorV3(address(hdxUsd)), HDX_MAX_AGE, ETH, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE);
         (uint256 p,) = hdxFirst.priceX18();
         assertEq(p, 2.4e17, "the same price");
         assertEq(address(hdxFirst.feedBase()), address(ethUsd), "ETH's feed is the numerator: ETH is token0");
@@ -44,7 +46,7 @@ contract RatioSourceTest is Test {
     /// 3. The one mistake left: a feed named with the wrong token turns the price upside down,
     /// 57.6 billion times smaller, about 248,000 ticks off. EXPECTED_TICK catches it.
     function test_feedsNamedWithTheWrongTokens_invertThePrice() public {
-        RatioSource wrong = new RatioSource(ETH, IAggregatorV3(address(hdxUsd)), hdx, IAggregatorV3(address(ethUsd)));
+        RatioSource wrong = new RatioSource(ETH, IAggregatorV3(address(hdxUsd)), HDX_MAX_AGE, hdx, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE);
         (uint256 right,) = _ethHdx().priceX18();
         (uint256 w,) = wrong.priceX18();
         assertEq(w, 4_166_666, "about 4.2e-12 raw HDX per raw ETH");
@@ -82,7 +84,7 @@ contract RatioSourceTest is Test {
     /// 6. Feed decimals are normalised: HDX/USD as an 18-decimal feed gives the same price.
     function test_feedDecimals_areNormalised() public {
         MockAggregator hdxUsd18 = new MockAggregator(18, 1e16); // $0.01 with 18 decimals
-        RatioSource src = new RatioSource(ETH, IAggregatorV3(address(ethUsd)), hdx, IAggregatorV3(address(hdxUsd18)));
+        RatioSource src = new RatioSource(ETH, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE, hdx, IAggregatorV3(address(hdxUsd18)), HDX_MAX_AGE);
         (uint256 p,) = src.priceX18();
         assertEq(p, 2.4e17);
     }
@@ -93,7 +95,7 @@ contract RatioSourceTest is Test {
         address token0 = _token(address(0x1000), 36);
         address token1 = _token(address(0x2000), 0);
         RatioSource src =
-            new RatioSource(token0, IAggregatorV3(address(hdxUsd)), token1, IAggregatorV3(address(ethUsd)));
+            new RatioSource(token0, IAggregatorV3(address(hdxUsd)), HDX_MAX_AGE, token1, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE);
         (uint256 p,) = src.priceX18();
         assertEq(p, 0);
     }
@@ -103,12 +105,59 @@ contract RatioSourceTest is Test {
         MockAggregator hollarUsd = new MockAggregator(8, 1e8); // $1
         address hollar = address(new MockERC20("Hollar", "HOLLAR", 18));
         RatioSource ratio =
-            new RatioSource(ETH, IAggregatorV3(address(ethUsd)), hollar, IAggregatorV3(address(hollarUsd)));
+            new RatioSource(ETH, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE, hollar, IAggregatorV3(address(hollarUsd)), 2 hours);
         ChainlinkSource single = new ChainlinkSource(IAggregatorV3(address(ethUsd)), ETH, hollar);
         (uint256 fromRatio,) = ratio.priceX18();
         (uint256 fromSingle,) = single.priceX18();
         assertEq(fromRatio, fromSingle, "the two sources agree");
         assertEq(fromRatio, 2400e18, "2,400 HOLLAR per ETH");
+    }
+
+    /// 9. A stalled fast feed is caught by its own limit, although the slow feed is older and inside
+    /// its own. Exactly at the limit still prices; one second past it is no price (audit C-7).
+    function test_aStalledFastFeed_isCaughtByItsOwnLimit() public {
+        RatioSource src = _ethHdx();
+        ethUsd.set(2400e8, block.timestamp - 20 hours);
+        hdxUsd.set(1e6, block.timestamp - 2 hours);
+        (uint256 p, uint256 updatedAt) = src.priceX18();
+        assertEq(p, 2.4e17, "HDX/USD at exactly its 2h limit still prices");
+        assertEq(updatedAt, block.timestamp - 20 hours, "and the time reported is the older, ETH/USD's");
+
+        vm.warp(block.timestamp + 1);
+        (p, updatedAt) = src.priceX18();
+        assertEq(p, 0, "one second past its own limit: no price");
+        assertEq(updatedAt, 0);
+    }
+
+    /// 10. The slow feed may be a day old, as Chainlink ETH/USD legitimately is on quiet days, but
+    /// not past its own limit.
+    function test_theSlowFeed_mayBeADayOld_butNotPastItsLimit() public {
+        RatioSource src = _ethHdx();
+        ethUsd.set(2400e8, block.timestamp - 24 hours);
+        (uint256 p,) = src.priceX18();
+        assertEq(p, 2.4e17, "24h old ETH/USD still prices");
+
+        ethUsd.set(2400e8, block.timestamp - 28 hours - 1);
+        (p,) = src.priceX18();
+        assertEq(p, 0, "past 28h: no price");
+    }
+
+    /// 11. A feed dated in the future cannot hide behind the other feed's older time (audit C-3).
+    function test_aFeedFromTheFuture_isNoPrice() public {
+        RatioSource src = _ethHdx();
+        hdxUsd.set(1e6, block.timestamp + 30 days);
+        (uint256 p, uint256 updatedAt) = src.priceX18();
+        assertEq(p, 0, "no price");
+        assertEq(updatedAt, 0, "and no timestamp, where it used to report ETH/USD's");
+    }
+
+    /// 12. Each limit travels with its feed through the sorting.
+    function test_eachLimitStaysWithItsFeed_whicheverOrder() public {
+        RatioSource hdxFirst = new RatioSource(
+            hdx, IAggregatorV3(address(hdxUsd)), HDX_MAX_AGE, ETH, IAggregatorV3(address(ethUsd)), ETH_MAX_AGE
+        );
+        assertEq(hdxFirst.maxAgeBase(), ETH_MAX_AGE, "ETH is token0, so ETH/USD's 28h is the base limit");
+        assertEq(hdxFirst.maxAgeQuote(), HDX_MAX_AGE, "and HDX/USD keeps its 2h");
     }
 
     /// @dev A token with `d` decimals at a chosen address, so a test decides which sorts first.

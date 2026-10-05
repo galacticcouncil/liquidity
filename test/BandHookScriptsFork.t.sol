@@ -140,8 +140,10 @@ contract BandHookScriptsForkTest is Test {
 
         _setA("FEED_A", address(hdxUsd)); // the HDX feed named with ETH, and the other way round
         _setA("FEED_A_PRICES", address(0));
+        _setU("FEED_A_MAX_AGE_S", 2 hours);
         _setA("FEED_B", address(ETH_USD));
         _setA("FEED_B_PRICES", address(hdx));
+        _setU("FEED_B_MAX_AGE_S", 28 hours);
         SetupPool setup = new SetupPool();
         try setup.run() {
             assertTrue(false, "the mispaired feeds should have been refused");
@@ -151,10 +153,12 @@ contract BandHookScriptsForkTest is Test {
         (IPriceSource none,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(none), address(0), "nothing configured");
 
-        _setA("FEED_A", address(hdxUsd)); // each feed with its own token, HDX's pair first
+        _setA("FEED_A", address(hdxUsd)); // each feed with its own token and limit, HDX's pair first
         _setA("FEED_A_PRICES", address(hdx));
+        _setU("FEED_A_MAX_AGE_S", 2 hours);
         _setA("FEED_B", address(ETH_USD));
         _setA("FEED_B_PRICES", address(0));
+        _setU("FEED_B_MAX_AGE_S", 28 hours);
         new SetupPool().run();
         (IPriceSource source,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(RatioSource(address(source)).feedBase()), address(ETH_USD), "ETH/USD first");
