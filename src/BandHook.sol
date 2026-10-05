@@ -531,14 +531,14 @@ contract BandHook is IUnlockCallback {
     }
 
     /// @dev Not fresh when the source reverts, uses up `SOURCE_GAS`, answers with less than two
-    /// numbers, or gives a price of zero, a time in the future or one older than `staleAfter`.
-    /// Then `beforeSwap` charges the fee cap and nothing is placed.
+    /// numbers, or gives a price of zero, one too large to take a log of, a time in the future or
+    /// one older than `staleAfter`. Then `beforeSwap` charges the fee cap and nothing is placed.
     function _read(IPriceSource source, uint32 staleAfter) internal view returns (int24 tick, bool fresh) {
         (bool ok, bytes memory answer) =
             address(source).staticcall{gas: SOURCE_GAS}(abi.encodeCall(IPriceSource.priceX18, ()));
         if (!ok || answer.length < 64) return (0, false);
         (uint256 p, uint256 updatedAt) = abi.decode(answer, (uint256, uint256));
-        if (p == 0) return (0, false);
+        if (p == 0 || p > uint256(type(int256).max)) return (0, false);
         if (updatedAt > block.timestamp || block.timestamp - updatedAt > staleAfter) return (0, false);
         tick = _tickFromPriceX18(p);
         fresh = true;

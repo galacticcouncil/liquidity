@@ -107,6 +107,19 @@ contract BandHookReviewFixesTest is Test {
         assertEq(address(now_), address(fresh), "replaced");
     }
 
+    // ---------- issue 5: a price too large for the log is no price
+
+    function test_aHugePrice_swapsPayTheCapInsteadOfReverting() public {
+        source.set(1 << 255, block.timestamp);
+        assertEq(_swapFee(key), CAP, "the swap goes through, at the cap");
+    }
+
+    function test_setSource_refusesAHugePrice() public {
+        IPriceSource huge = IPriceSource(address(new MockPriceSource(1 << 255)));
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setSource(id, huge, 0, 10);
+    }
+
     // ---------- helpers
 
     function _key(int24 spacing) internal view returns (PoolKey memory) {
