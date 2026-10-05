@@ -563,9 +563,12 @@ contract BandHook is IUnlockCallback {
         fresh = true;
     }
 
-    /// @dev tick = ln(price) / ln(1.0001); wad-based natural log.
+    /// @dev tick = ln(price) / ln(1.0001), rounded down as Uniswap rounds a pool's tick, so the
+    /// oracle and the pool agree on the tick of one price; wad-based natural log.
     function _tickFromPriceX18(uint256 priceX18) internal pure returns (int24) {
-        int256 t = _lnWad(int256(priceX18)) / LN_TICK;
+        int256 ln = _lnWad(int256(priceX18));
+        int256 t = ln / LN_TICK;
+        if (ln < 0 && t * LN_TICK != ln) t--;
         if (t > TickMath.MAX_TICK) t = TickMath.MAX_TICK;
         if (t < TickMath.MIN_TICK) t = TickMath.MIN_TICK;
         return int24(t);

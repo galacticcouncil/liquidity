@@ -13,8 +13,10 @@ import {Currency} from "v4-core/types/Currency.sol";
 import {SwapParams} from "v4-core/types/PoolOperation.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
 import {PoolSwapTest} from "v4-core/test/PoolSwapTest.sol";
+import {FixedPointMathLib} from "solmate/src/utils/FixedPointMathLib.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 import {BandHook} from "../src/BandHook.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
@@ -170,6 +172,18 @@ contract BandHookReviewFixesTest is Test {
         hook.configure(_key(20), cfg);
     }
 
+    // ---------- issue 20: the oracle tick rounds down, as the pool's tick does
+
+    /// Below parity: a pool set at the oracle price, as 01_SetupPool sets it, pays exactly the
+    /// floor. Rounded toward zero, the oracle tick sat one above the pool's: 100 ppm too much.
+    function test_belowParity_poolOnTheOracle_paysExactlyTheFloor() public {
+        assertEq(_feeOfAPoolAtTheOracle(5e17, 30), FLOOR);
+    }
+
+    function test_aboveParity_poolOnTheOracle_paysExactlyTheFloor() public {
+        assertEq(_feeOfAPoolAtTheOracle(2e18, 40), FLOOR);
+    }
+
     // ---------- helpers
 
     function _key(int24 spacing) internal view returns (PoolKey memory) {
@@ -197,6 +211,16 @@ contract BandHookReviewFixesTest is Test {
             enabled: true,
             autoRecenter: false
         });
+    }
+
+    /// A second pool whose oracle reports `priceX18`, initialized and funded at that price the way
+    /// the setup script does it; returns the fee of a small swap.
+    function _feeOfAPoolAtTheOracle(uint256 priceX18, int24 spacing) internal returns (uint24) {
+        PoolKey memory k = _key(spacing);
+        hook.configure(k, _cfg(IPriceSource(address(new MockPriceSource(priceX18)))));
+        manager.initialize(k, uint160(FixedPointMathLib.sqrt(FullMath.mulDiv(priceX18, 1 << 192, 1e18))));
+        hook.fund(k.toId(), FUND, FUND);
+        return _swapFee(k);
     }
 
     /// A small sell of token0 on `k`; returns the fee from the pool's Swap event.
