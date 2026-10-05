@@ -218,8 +218,8 @@ contract BandHook is IUnlockCallback {
     /// @dev The way to replace a source that has stopped answering; meanwhile swaps pay the fee
     /// cap and nothing is placed, and the pool also recovers by itself if the source answers
     /// again. It never calls the old source, so it works whatever state that source is in.
-    /// @dev Freshness is judged exactly as `_oracleTick` judges it, so a source this accepts is
-    /// one the hook will use. A timestamp from the future is refused, not trusted for ever.
+    /// @dev The new source is read exactly as swaps read it, gas limit included, so a source this
+    /// accepts is one the hook will use. A timestamp from the future is refused, not trusted for ever.
     function setSource(PoolId id, IPriceSource newSource, int24 expectedTick, int24 tolerance)
         external
         onlyOwner
@@ -228,12 +228,8 @@ contract BandHook is IUnlockCallback {
         if (address(cfg.source) == address(0)) revert NotEnabled();
         if (address(newSource) == address(0) || tolerance < 0) revert BadConfig();
 
-        (uint256 p, uint256 updatedAt) = newSource.priceX18();
-        if (p == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > cfg.staleAfter) {
-            revert BadConfig();
-        }
-
-        int24 newTick = _tickFromPriceX18(p);
+        (int24 newTick, bool fresh) = _read(newSource, cfg.staleAfter);
+        if (!fresh) revert BadConfig();
         if (_absDiff(newTick, expectedTick) > uint256(int256(tolerance))) {
             revert SourceTickMismatch(expectedTick, newTick);
         }
@@ -530,17 +526,20 @@ contract BandHook is IUnlockCallback {
 
     // ---------- internals
 
+    function _oracleTick(PoolConfig storage cfg) internal view returns (int24 tick, bool fresh) {
+        return _read(cfg.source, cfg.staleAfter);
+    }
+
     /// @dev Not fresh when the source reverts, uses up `SOURCE_GAS`, answers with less than two
     /// numbers, or gives a price of zero, a time in the future or one older than `staleAfter`.
     /// Then `beforeSwap` charges the fee cap and nothing is placed.
-    function _oracleTick(PoolConfig storage cfg) internal view returns (int24 tick, bool fresh) {
+    function _read(IPriceSource source, uint32 staleAfter) internal view returns (int24 tick, bool fresh) {
         (bool ok, bytes memory answer) =
-            address(cfg.source).staticcall{gas: SOURCE_GAS}(abi.encodeCall(IPriceSource.priceX18, ()));
+            address(source).staticcall{gas: SOURCE_GAS}(abi.encodeCall(IPriceSource.priceX18, ()));
         if (!ok || answer.length < 64) return (0, false);
         (uint256 p, uint256 updatedAt) = abi.decode(answer, (uint256, uint256));
-        if (p == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > cfg.staleAfter) {
-            return (0, false);
-        }
+        if (p == 0) return (0, false);
+        if (updatedAt > block.timestamp || block.timestamp - updatedAt > staleAfter) return (0, false);
         tick = _tickFromPriceX18(p);
         fresh = true;
     }

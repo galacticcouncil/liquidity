@@ -20,6 +20,15 @@ import {BandHook} from "../src/BandHook.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 import {MockPriceSource} from "./mocks/MockPriceSource.sol";
 
+/// A source that spends 300k gas before answering: fine with no gas limit, too dear for a swap's read.
+contract ExpensiveSource is IPriceSource {
+    function priceX18() external view returns (uint256, uint256) {
+        uint256 start = gasleft();
+        while (start - gasleft() < 300_000) {}
+        return (1e18, block.timestamp);
+    }
+}
+
 contract BandHookReviewFixesTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -81,6 +90,21 @@ contract BandHookReviewFixesTest is Test {
     function test_futureDatedPrice_swapsPayTheCap() public {
         source.set(1e18, block.timestamp + 1 hours);
         assertEq(_swapFee(key), CAP, "a time from the future: the cap");
+    }
+
+    // ---------- issue 4: setSource reads a new source the way swaps read it
+
+    function test_setSource_refusesASourceTooDearForTheSwapRead() public {
+        IPriceSource dear = IPriceSource(address(new ExpensiveSource()));
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setSource(id, dear, 0, 10);
+    }
+
+    function test_setSource_stillAcceptsANormalSource() public {
+        IPriceSource fresh = IPriceSource(address(new MockPriceSource(1e18)));
+        hook.setSource(id, fresh, 0, 10);
+        (IPriceSource now_,,,,,,,,,,,) = hook.config(id);
+        assertEq(address(now_), address(fresh), "replaced");
     }
 
     // ---------- helpers
