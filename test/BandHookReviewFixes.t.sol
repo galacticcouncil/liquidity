@@ -46,6 +46,7 @@ contract BandHookReviewFixesTest is Test {
     BandHook hook;
     PoolKey key;
     PoolId id;
+    address stranger = makeAddr("stranger");
 
     function setUp() public {
         manager = IPoolManager(address(new PoolManager(address(this))));
@@ -118,6 +119,37 @@ contract BandHookReviewFixesTest is Test {
         IPriceSource huge = IPriceSource(address(new MockPriceSource(1 << 255)));
         vm.expectRevert(BandHook.BadConfig.selector);
         hook.setSource(id, huge, 0, 10);
+    }
+
+    // ---------- issue 7: `enabled` changes only through setEnabled
+
+    function test_setParams_keepsThePoolEnabled() public {
+        BandHook.PoolConfig memory cfg = _cfg(IPriceSource(address(source)));
+        cfg.enabled = false; // a routine update built with the field left at its default
+        hook.setParams(id, cfg);
+
+        (,,,,,,,,,, bool enabled,) = hook.config(id);
+        assertTrue(enabled, "still on");
+        hook.fund(id, 0, 0); // and fund still works
+    }
+
+    function test_setEnabled_stopsFundAndRecenter_notSwaps() public {
+        hook.setEnabled(id, false);
+
+        vm.expectRevert(BandHook.NotEnabled.selector);
+        hook.fund(id, 0, 0);
+        vm.expectRevert(BandHook.NotEnabled.selector);
+        hook.recenter(id);
+        assertEq(_swapFee(key), FLOOR, "swaps keep trading what is placed");
+
+        hook.setEnabled(id, true);
+        hook.fund(id, 0, 0);
+    }
+
+    function test_setEnabled_ownerOnly() public {
+        vm.prank(stranger);
+        vm.expectRevert(BandHook.NotOwner.selector);
+        hook.setEnabled(id, false);
     }
 
     // ---------- helpers

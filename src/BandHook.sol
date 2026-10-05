@@ -64,7 +64,7 @@ contract BandHook is IUnlockCallback {
         uint16 backstopBps; // share of funded amounts placed in the backstop
         int24 triggerTicks; // recenter when |oracleTick - coreCenter| > trigger
         int24 guardTicks; // refuse recenter when |poolTick - oracleTick| > guard
-        bool enabled;
+        bool enabled; // fund and recenter only; swaps keep trading what is placed, withdraw stops that
         bool autoRecenter; // also recenter at the end of a swap that makes it due
     }
 
@@ -199,16 +199,18 @@ contract BandHook is IUnlockCallback {
     }
 
     /// @notice Tune parameters on a live pool. The price source cannot be changed here;
-    /// use `setSource`, which validates the replacement. The in-swap switch is not changed
-    /// here either, only by `setAutoRecenter`, so a routine update cannot undo a switch-off.
+    /// use `setSource`, which validates the replacement. The two switches are not changed here
+    /// either, only by `setAutoRecenter` and `setEnabled`, so a routine update cannot flip them.
     function setParams(PoolId id, PoolConfig calldata cfg) external onlyOwner {
         PoolConfig storage c = config[id];
         if (address(c.source) == address(0)) revert NotEnabled();
         if (address(cfg.source) != address(c.source)) revert BadConfig();
         _validate(cfg);
         bool autoOn = c.autoRecenter;
+        bool on = c.enabled;
         config[id] = cfg;
         config[id].autoRecenter = autoOn;
+        config[id].enabled = on;
         emit Configured(id);
     }
 
@@ -248,6 +250,15 @@ contract BandHook is IUnlockCallback {
         PoolConfig storage cfg = config[id];
         if (address(cfg.source) == address(0)) revert NotEnabled();
         cfg.autoRecenter = on;
+        emit Configured(id);
+    }
+
+    /// @notice Turn `fund` and `recenter` (manual and in-swap) on or off for one pool. Owner only.
+    /// Swaps keep trading whatever is placed; to stop that, `withdraw`.
+    function setEnabled(PoolId id, bool on) external onlyOwner {
+        PoolConfig storage cfg = config[id];
+        if (address(cfg.source) == address(0)) revert NotEnabled();
+        cfg.enabled = on;
         emit Configured(id);
     }
 

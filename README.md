@@ -96,6 +96,10 @@ idle amounts such as a donation.
 `setSource` is the recovery path for a dead feed: owner-only, validates the
 replacement against an expected tick, never calls the old source.
 
+`setEnabled(poolId, false)` stops `fund` and `recenter` (manual and in-swap)
+for one pool; `setParams` never changes it. Swaps keep trading whatever is
+placed: to stop trading against the hook's capital, `withdraw`.
+
 ## In-swap recenter (per pool, off by default)
 
 A pool with `autoRecenter` on is also recentered at the end of the swap that
