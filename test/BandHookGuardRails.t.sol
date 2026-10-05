@@ -156,14 +156,14 @@ contract BandHookGuardRailsTest is Test {
     function test_R10_anAbsurdTimestampDoesNotBrickSwaps() public {
         hook.fund(id, FUND, FUND);
         source.set(1e18, type(uint256).max);
-        assertEq(_swapFee(key), 3000, "treated as no price, so the floor fee, and no panic");
+        assertEq(_swapFee(key), 20000, "treated as no price, so the fee cap, and no panic");
     }
 
     /// A feed reporting the future is broken, not fresh.
     function test_R10_aFutureTimestampIsNotFresh() public {
         hook.fund(id, FUND, FUND);
         source.set(1.05e18, block.timestamp + 365 days);
-        assertEq(_swapFee(key), 3000, "floor fee, because a future reading is not trusted");
+        assertEq(_swapFee(key), 20000, "fee cap, because a future reading is not trusted");
 
         vm.expectRevert(BandHook.StaleOracle.selector);
         hook.recenter(id);

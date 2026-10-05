@@ -37,8 +37,7 @@ contract ChainlinkSource is IPriceSource {
     }
 
     /// @dev A price that scales to zero is reported as "no price", the same as a
-    /// non-positive answer. Reverting here would stop every swap in the pool, and the
-    /// hook already treats (0, 0) as stale.
+    /// non-positive answer. The hook reads (0, 0) as no price: fee cap, nothing placed.
     function priceX18() external view returns (uint256, uint256) {
         (, int256 answer,, uint256 updatedAt,) = feed.latestRoundData();
         if (answer <= 0) return (0, 0);

@@ -79,8 +79,7 @@ means and what to do:
 
 | Revert | Meaning | Response |
 |---|---|---|
-| `StaleOracle` | price source older than `staleAfter`, zero, or dated in the future | fix the feed/pipeline; nothing moved. Swaps continue at the floor fee |
-| `StaleOracle` | price source failing: it reverts, runs out of its 200k gas, or answers malformed | nothing moved. Swaps continue at the **fee cap**; the pool recovers by itself when the source answers again, or replace it with `setSource` |
+| `StaleOracle` | no usable price: the source is older than `staleAfter`, gives zero or a time in the future, reverts, runs out of its 200k gas, or answers malformed | nothing moved. Swaps continue at the **fee cap**, so arbitrage pays the most while the hook cannot see the market; the pool recovers by itself when the source answers again, or replace it with `setSource` |
 | `GuardTripped` | pool price > `guardTicks` from the oracle | funded pool: wait for arbitrage to align it. Empty pool: write and run the SafeFund batch again, its anchor puts it back. Never force capital against an unverified price |
 | `EmptyBand` | nothing at all could be placed: the hook holds no tokens for this pool. A full band exit no longer causes it; the held token goes into the one-sided limit | fund the pool; nothing moved |
 

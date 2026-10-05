@@ -144,12 +144,12 @@ contract BandHookTest is Test {
         assertLt(fee, CAP);
     }
 
-    function test_fee_floorOnStaleOracle() public {
+    function test_fee_capOnStaleOracle() public {
         _fund();
         source.set(1.05e18, block.timestamp);
         skip(2 hours); // beyond staleAfter
         uint24 fee = _swapFee(true, -1e18);
-        assertEq(fee, FLOOR);
+        assertEq(fee, CAP);
     }
 
     // ---------- funding & positions

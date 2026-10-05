@@ -150,7 +150,7 @@ contract BandHookValidateConfigTest is Test {
 
     // ---------- the silent kill switch
 
-    /// Zero seconds means every reading is already stale: the fee pins to the floor and
+    /// Zero seconds means every reading is already stale: the fee pins to the cap and
     /// recenter reverts forever. An unset environment variable reads as zero.
     function test_staleAfter_zero_isRejected() public {
         BandHook.PoolConfig memory cfg = _base();

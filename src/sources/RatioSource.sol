@@ -44,7 +44,7 @@ contract RatioSource is IPriceSource {
     }
 
     /// @dev "No price", (0, 0), when either answer is not positive, older than its feed's limit,
-    /// or dated in the future. The hook reads that as stale: floor fee, nothing placed.
+    /// or dated in the future. The hook reads that as no price: fee cap, nothing placed.
     function priceX18() external view returns (uint256, uint256) {
         (, int256 aB,, uint256 uB,) = feedBase.latestRoundData();
         (, int256 aQ,, uint256 uQ,) = feedQuote.latestRoundData();

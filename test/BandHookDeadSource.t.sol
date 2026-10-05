@@ -94,9 +94,9 @@ contract BandHookDeadSourceTest is Test {
         assertEq(liquidityAfter, liquidity, "nor did its liquidity");
     }
 
-    function test_aStaleSource_stillPaysTheFloor() public {
+    function test_aStaleSource_paysTheCapToo() public {
         vm.warp(block.timestamp + 2 hours); // older than staleAfter (1 hour), but still answering
-        assertEq(_swapFee(key), FLOOR, "stale is not failed: the floor, as before");
+        assertEq(_swapFee(key), CAP, "stale is no price, like failed: the cap");
     }
 
     function test_aRevivedSource_pricesNormallyWithoutSetSource() public {

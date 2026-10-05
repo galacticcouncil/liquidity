@@ -58,7 +58,7 @@ contract BandHook is IUnlockCallback {
         uint24 feeFloor; // ppm
         uint24 feeCap; // ppm
         uint32 feeSlopePpm; // ppm of extra fee per 100% pool-vs-oracle divergence
-        uint32 staleAfter; // seconds; older source => floor fee, recenter disabled
+        uint32 staleAfter; // seconds; an older price counts as no price: cap fee, nothing placed
         int24 halfBandTicks; // core band half-width
         int24 backstopHalfTicks; // 0 = no backstop
         uint16 backstopBps; // share of funded amounts placed in the backstop
@@ -307,11 +307,9 @@ contract BandHook is IUnlockCallback {
         PoolId id = key.toId();
         PoolConfig storage cfg = config[id];
         if (address(cfg.source) == address(0)) revert NotEnabled();
-        uint24 fee = cfg.feeFloor;
-        (int24 oracleTick, bool fresh, bool failed) = _oracleTick(cfg);
-        if (failed) {
-            fee = cfg.feeCap;
-        } else if (fresh) {
+        uint24 fee = cfg.feeCap; // no usable price: arbitrage pays the most while the hook is blind
+        (int24 oracleTick, bool fresh) = _oracleTick(cfg);
+        if (fresh) {
             (, int24 poolTick,,) = manager.getSlot0(id);
             uint256 dTicks = _absDiff(poolTick, oracleTick);
             // 1 tick ~ 0.01% divergence; slope is ppm per 100%
@@ -372,7 +370,7 @@ contract BandHook is IUnlockCallback {
     function recenter(PoolId id) external {
         PoolConfig storage cfg = config[id];
         if (!cfg.enabled) revert NotEnabled();
-        (int24 oracleTick, bool fresh,) = _oracleTick(cfg);
+        (int24 oracleTick, bool fresh) = _oracleTick(cfg);
         if (!fresh) revert StaleOracle();
         Pos storage c = core[id];
         if (c.liquidity != 0 && _absDiff(oracleTick, c.center) <= uint256(int256(cfg.triggerTicks))) {
@@ -459,7 +457,7 @@ contract BandHook is IUnlockCallback {
         if (!cfg.enabled || !cfg.autoRecenter) return false;
         Pos memory c = core[id];
         if (c.liquidity == 0) return false;
-        (int24 oracleTick, bool fresh,) = _oracleTick(cfg);
+        (int24 oracleTick, bool fresh) = _oracleTick(cfg);
         if (!fresh || _absDiff(oracleTick, c.center) <= uint256(int256(cfg.triggerTicks))) return false;
         (, int24 poolTick,,) = manager.getSlot0(id);
         if (_absDiff(poolTick, oracleTick) > uint256(int256(cfg.guardTicks))) return false;
@@ -502,7 +500,7 @@ contract BandHook is IUnlockCallback {
     /// the burns back.
     function _place(PoolKey memory key, PoolId id, bool isFund) internal {
         PoolConfig storage cfg = config[id];
-        (int24 center, bool fresh,) = _oracleTick(cfg);
+        (int24 center, bool fresh) = _oracleTick(cfg);
         if (!fresh) revert StaleOracle();
         (uint160 sqrtP, int24 poolTick,,) = manager.getSlot0(id);
         if (_absDiff(poolTick, center) > uint256(int256(cfg.guardTicks))) revert GuardTripped();
@@ -532,16 +530,16 @@ contract BandHook is IUnlockCallback {
 
     // ---------- internals
 
-    /// @dev `failed`: the source reverted, used up `SOURCE_GAS`, or answered with less than two
-    /// numbers. A failed read is never fresh; `beforeSwap` charges the fee cap for it, while a stale
-    /// price (zero, from the future, or older than `staleAfter`) gets the floor.
-    function _oracleTick(PoolConfig storage cfg) internal view returns (int24 tick, bool fresh, bool failed) {
+    /// @dev Not fresh when the source reverts, uses up `SOURCE_GAS`, answers with less than two
+    /// numbers, or gives a price of zero, a time in the future or one older than `staleAfter`.
+    /// Then `beforeSwap` charges the fee cap and nothing is placed.
+    function _oracleTick(PoolConfig storage cfg) internal view returns (int24 tick, bool fresh) {
         (bool ok, bytes memory answer) =
             address(cfg.source).staticcall{gas: SOURCE_GAS}(abi.encodeCall(IPriceSource.priceX18, ()));
-        if (!ok || answer.length < 64) return (0, false, true);
+        if (!ok || answer.length < 64) return (0, false);
         (uint256 p, uint256 updatedAt) = abi.decode(answer, (uint256, uint256));
         if (p == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > cfg.staleAfter) {
-            return (0, false, false);
+            return (0, false);
         }
         tick = _tickFromPriceX18(p);
         fresh = true;
