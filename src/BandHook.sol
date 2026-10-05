@@ -183,6 +183,8 @@ contract BandHook is IUnlockCallback {
     // ---------- configuration
 
     /// @notice Set up a pool on this hook, once. Owner only.
+    /// @dev One pool per hook: every pool on a hook spends from the same token balance
+    /// (`_available` counts all of it), so the runbook deploys a hook for each pool.
     /// @dev Does not check the source. The repo's sources take their decimals and orientation
     /// from the token addresses, and `01_SetupPool` checks the chosen feed against the operator's
     /// `EXPECTED_TICK` before it calls this. A later replacement goes through `setSource`.
