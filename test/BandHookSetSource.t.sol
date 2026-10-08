@@ -33,7 +33,7 @@ contract BandHookSetSourceTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     address carol = makeAddr("carol");
     uint256 constant FUND = 100_000e18;
     uint24 constant FLOOR = 3000;
@@ -80,8 +80,9 @@ contract BandHookSetSourceTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
-            enabled: true
+            guardTicks: 300,
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -108,24 +109,23 @@ contract BandHookSetSourceTest is Test {
     }
 
     function _currentSource() internal view returns (address s) {
-        (IPriceSource src,,,,,,,,,,) = hook.config(id);
+        (IPriceSource src,,,,,,,,,,,) = hook.config(id);
         return address(src);
     }
 
     // ---------- the recovery path
 
-    /// The whole point: a source that stops answering used to end the pool. Now the
-    /// owner can replace it, and everything works again.
+    /// The whole point: a source that stops answering used to end the pool. Now the pool
+    /// keeps trading at the fee cap while nothing is placed, and the owner can replace it.
     function test_setSource_recoversAPoolWhoseSourceReverts() public {
         hook.fund(id, FUND, FUND);
         assertEq(_swapFee(), FLOOR, "trading normally to start with");
 
         source.kill();
 
-        vm.expectRevert();
-        _swap();
+        assertEq(_swapFee(), 20000, "while the source is dead, swaps pay the fee cap");
 
-        vm.expectRevert();
+        vm.expectRevert(BandHook.StaleOracle.selector);
         hook.recenter(id);
 
         MockPriceSource replacement = new MockPriceSource(1e18);
@@ -182,6 +182,24 @@ contract BandHookSetSourceTest is Test {
         skip(2 hours); // staleAfter is 1 hour
         vm.expectRevert(BandHook.BadConfig.selector);
         hook.setSource(id, IPriceSource(address(old)), 0, 50);
+    }
+
+    /// Bob installs a source whose clock runs 10 minutes ahead: refused with BadConfig. The
+    /// old check accepted it, and then every swap read the price as stale.
+    function test_setSource_rejectsASourceFromTheFuture() public {
+        MockPriceSource ahead = new MockPriceSource(1e18);
+        ahead.set(1e18, block.timestamp + 10 minutes);
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setSource(id, IPriceSource(address(ahead)), 0, 50);
+        assertEq(_currentSource(), address(source), "the old source stays");
+    }
+
+    /// A source reporting the largest possible timestamp: BadConfig, not an overflow panic.
+    function test_setSource_rejectsAnAbsurdTimestampWithBadConfig() public {
+        MockPriceSource absurd = new MockPriceSource(1e18);
+        absurd.set(1e18, type(uint256).max);
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setSource(id, IPriceSource(address(absurd)), 0, 50);
     }
 
     /// A replacement that reverts takes the revert with it, rather than being installed.

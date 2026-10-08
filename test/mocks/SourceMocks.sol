@@ -46,8 +46,28 @@ contract ToggleRevertSource is IPriceSource {
         dead = true;
     }
 
+    function revive() external {
+        dead = false;
+    }
+
     function priceX18() external view returns (uint256, uint256) {
         if (dead) revert("source dead");
         return (price, updatedAt);
+    }
+}
+
+/// @notice A source stuck in a loop: every read runs until it is out of gas.
+contract GasBurnerSource is IPriceSource {
+    function priceX18() external view returns (uint256, uint256) {
+        uint256 i;
+        while (gasleft() > 0) i++;
+        return (i, block.timestamp);
+    }
+}
+
+/// @notice A source that answers with one number instead of two.
+contract ShortAnswerSource {
+    function priceX18() external pure returns (uint256) {
+        return 1e18;
     }
 }

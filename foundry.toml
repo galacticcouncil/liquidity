@@ -6,6 +6,7 @@ solc_version = "0.8.26"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 800
+fs_permissions = [{ access = "read-write", path = "./broadcast" }]
 
 remappings = [
     "@uniswap/v4-core/=lib/v4-core/",

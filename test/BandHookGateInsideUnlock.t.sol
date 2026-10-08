@@ -69,7 +69,7 @@ contract BandHookGateInsideUnlockTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     uint256 constant FUND = 100_000e18;
 
     function setUp() public {
@@ -107,7 +107,7 @@ contract BandHookGateInsideUnlockTest is Test {
         return BandHook.PoolConfig({
             source: IPriceSource(address(source)),
             feeFloor: 3000,
-            feeCap: 20000,
+            feeCap: 3500, // low enough that a 100-tick guard clears the dead band rule
             feeSlopePpm: 1_000_000,
             staleAfter: 1 hours,
             halfBandTicks: 1000,
@@ -115,7 +115,8 @@ contract BandHookGateInsideUnlockTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 100,
-            enabled: true
+            enabled: true,
+            autoRecenter: false
         });
     }
 
