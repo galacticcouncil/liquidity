@@ -4,7 +4,6 @@ pragma solidity 0.8.26;
 // Gas of the in-swap recenter, one scenario per test so every measured call starts from the same
 // state: first what a trader pays, then what the attempt alone needs, against RECENTER_GAS.
 // Run with `forge test --isolate` so each call is its own transaction with cold storage.
-// Written by Claude at Yash's request (2026-09-23).
 
 import {Test} from "forge-std/Test.sol";
 import {PoolManager} from "v4-core/PoolManager.sol";
@@ -208,7 +207,7 @@ contract BandHookAttemptGasTest is Test {
     }
 
     /// The HDX shape with its backstop, second recenter, the pool 299 ticks short of the oracle
-    /// (guard 300): the dearest natural case measured (audit B-3).
+    /// (guard 300): the dearest natural case measured.
     function test_attempt_hdxShape_secondRecenter_poolShortOfTheOracle() public {
         (PoolKey memory k, PoolId i) = _pool(false, 60, 1000, 16_000, 3500, 20_000, 500, 300);
         _moveBoth(k, -542);

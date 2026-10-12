@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// The sandwich around a recenter (blind pass F5), measured. Inside one unlock an attacker pushes the
+// The sandwich around a recenter, measured. Inside one unlock an attacker pushes the
 // pool to the edge of the guard, lets the recenter happen at that price, and trades back. Profit is
 // valued at the oracle price. Compared with the same two trades and no recenter, and with the manual
-// path (three separate transactions). Written by Claude at Yash's request (2026-09-23).
+// path (three separate transactions).
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -258,7 +258,7 @@ contract BandHookSandwichTest is Test {
         _row(_c("4%, guard 300: push +300, unwind to oracle", 300, 1.04e18, 392, 392, 692, 392, 0, 0));
     }
 
-    /// The blind pass's profitable case: the market has left the old band (+8%, the band is +-700),
+    /// The profitable case: the market has left the old band (+8%, the band is +-700),
     /// so the push only meets the thin backstop, and the hook holds spare tokens of both kinds, so
     /// the re-mint can be two-sided and deep.
     function test_sandwich_pastTheBand_withSpareTokens() public {

@@ -19,7 +19,7 @@ import {BandHook} from "../src/BandHook.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 import {MockPriceSource} from "./mocks/MockPriceSource.sol";
 
-/// The hook must never burn a position it cannot replace. Audit finding R1: once the price has
+/// The hook must never burn a position it cannot replace. Once the price has
 /// left the band the held token alone makes no two-sided liquidity, and the burn would move the
 /// whole book to idle. Part one refused such a recentre; issue #3 places the held token as a
 /// one-sided limit instead, so every burn is replaced and nothing is stranded.
@@ -201,7 +201,7 @@ contract BandHookEmptyBandTest is Test {
     // ---------- what still works
 
     /// With a dust amount of the scarce token the re-mint places something, so the
-    /// recentre goes ahead. No regression on the H3 fix.
+    /// recentre goes ahead.
     function test_withDust_theRecentreStillHappens() public {
         hook.fund(id, BASE, BASE);
         (int24 lo, int24 hi,,) = hook.core(id);

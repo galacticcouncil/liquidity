@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// The price sources read each pool token's decimals from the token itself (audit C-2, A-6).
+// The price sources read each pool token's decimals from the token itself.
 // These tests pin the one helper that does it.
 
 import {Test} from "forge-std/Test.sol";

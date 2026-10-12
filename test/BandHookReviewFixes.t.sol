@@ -74,7 +74,7 @@ contract BandHookReviewFixesTest is Test {
         hook.fund(id, FUND, FUND);
     }
 
-    // ---------- issue 3: no usable price pays the cap, whatever the reason
+    // ---------- no usable price pays the cap, whatever the reason
 
     function test_freshSourceAtTheOracle_paysTheFloor() public {
         assertEq(_swapFee(key), FLOOR, "a fresh price with the pool on it: the floor, as before");
@@ -95,7 +95,7 @@ contract BandHookReviewFixesTest is Test {
         assertEq(_swapFee(key), CAP, "a time from the future: the cap");
     }
 
-    // ---------- issue 4: setSource reads a new source the way swaps read it
+    // ---------- setSource reads a new source the way swaps read it
 
     function test_setSource_refusesASourceTooDearForTheSwapRead() public {
         IPriceSource dear = IPriceSource(address(new ExpensiveSource()));
@@ -110,7 +110,7 @@ contract BandHookReviewFixesTest is Test {
         assertEq(address(now_), address(fresh), "replaced");
     }
 
-    // ---------- issue 5: a price too large for the log is no price
+    // ---------- a price too large for the log is no price
 
     function test_aHugePrice_swapsPayTheCapInsteadOfReverting() public {
         source.set(1 << 255, block.timestamp);
@@ -123,7 +123,7 @@ contract BandHookReviewFixesTest is Test {
         hook.setSource(id, huge, 0, 10);
     }
 
-    // ---------- issue 7: `enabled` changes only through setEnabled
+    // ---------- `enabled` changes only through setEnabled
 
     function test_setParams_keepsThePoolEnabled() public {
         BandHook.PoolConfig memory cfg = _cfg(IPriceSource(address(source)));
@@ -154,7 +154,7 @@ contract BandHookReviewFixesTest is Test {
         hook.setEnabled(id, false);
     }
 
-    // ---------- issue 11: the guard is at most 4x its own minimum
+    // ---------- the guard is at most 4x its own minimum
 
     /// At a 1% cap the minimum is 161 (dead band 111 + margin 50), so the ceiling is 644.
     function test_guardAboveFourTimesItsMinimum_isRefused() public {
@@ -172,7 +172,7 @@ contract BandHookReviewFixesTest is Test {
         hook.configure(_key(20), cfg);
     }
 
-    // ---------- issue 20: the oracle tick rounds down, as the pool's tick does
+    // ---------- the oracle tick rounds down, as the pool's tick does
 
     /// Below parity: a pool set at the oracle price, as 01_SetupPool sets it, pays exactly the
     /// floor. Rounded toward zero, the oracle tick sat one above the pool's: 100 ppm too much.

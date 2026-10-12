@@ -20,7 +20,7 @@ import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 import {MockPriceSource} from "./mocks/MockPriceSource.sol";
 
 /// fund() places capital against the pool price, so it must refuse when that price is
-/// unverified: stale oracle, or pool too far from it. Audit finding C1.
+/// unverified: stale oracle, or pool too far from it.
 contract BandHookFundGuardTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -192,7 +192,7 @@ contract BandHookFundGuardTest is Test {
         hook.fund(id, FUND, FUND);
     }
 
-    /// Ben's point: every funding, not only the first. Measured before the fix at
+    /// Every funding, not only the first. Measured before the fix at
     /// $23,125 on a $200k top-up during a stale window.
     function test_topUp_refusedWhenThePoolHasBeenMoved() public {
         hook.fund(id, FUND, FUND);
@@ -289,7 +289,7 @@ contract BandHookFundGuardTest is Test {
 
     // ---------- the coupling issue #2 fixed
 
-    /// AUDIT FINDING H1, fixed by issue #2. `fund` shares `guardTicks` with `recenter`, and a
+    /// Fixed by issue #2. `fund` shares `guardTicks` with `recenter`, and a
     /// 2% fee cap leaves arbitrage resting up to 212 ticks from the oracle, so HDX's old guard
     /// of 200 refused ordinary top-ups. That guard is now refused at configure time, and at 300
     /// a fund, a recentre and a top-up all go through with the pool parked at the rest point.

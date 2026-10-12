@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// Bands wide enough to reach the end of the price range (audit A-1): their edges are cut at the
+// Bands wide enough to reach the end of the price range: their edges are cut at the
 // last usable tick before any price is taken from them, so every width `_validate` accepts funds.
 
 import {Test} from "forge-std/Test.sol";

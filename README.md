@@ -5,7 +5,6 @@ Uniswap v4 dynamic-fee pools on Robinhood Chain (chain id 4663), market-made by
 backstop, oracle-guarded permissionless recentering, divergence-driven dynamic
 fee. Pools: **ETH/HOLLAR, HDX/HOLLAR, ETH/HDX** (native ETH).
 
-Design + evidence: garden note `wiki/note-robinhood-pools-proposal`.
 Audit + fixes: PR #1 (merged 2026-09-18).
 
 ## Layout
@@ -14,9 +13,9 @@ Audit + fixes: PR #1 (merged 2026-09-18).
 - `src/sources/` — `ChainlinkSource` (one feed, built from the token it prices and the pool's other token), `RatioSource` (two USD feeds, each named with the token it prices; the ETH/HDX source). Both read the tokens' decimals and work out the orientation themselves
 - `script/00`, `01`, `03` — per pool: deploy its hook (CREATE2 salt-mined to the flag bits), set it up (source, expected-tick check, configure, initialize), hand it to the Safe
 - `script/SafeFund.s.sol` — writes the Safe batch that anchors the pool price onto the oracle and funds it in one transaction
+- `script/PoolAnchor.sol` — the helper the batch calls to move the pool price onto the oracle
 - `script/WalletFund.s.sol`, `script/fund.sh` — the same funding from a plain wallet, as one EIP-7702 transaction: `check`, then `send`
 - `script/mainnet/` — ETH/HOLLAR's settings for the live chain, and a rehearsal of the whole launch on a local fork
-- `script/PoolAnchor.sol` — the helper the batch calls to move the pool price onto the oracle
 - `test/` — unit tests (ERC20 + native pools, audit regression suites) and fork tests against the live PoolManager, including the whole per-pool routine
 
 ## Prerequisites
@@ -75,6 +74,7 @@ forge script script/SafeFund.s.sol --rpc-url robinhood --broadcast           # o
 
 Handover verification, for every hook, before the Safe funds it: assert `owner` is the Safe,
 `pendingOwner` is zero, and the deploy key holds no role of any kind.
+
 ## Funding from a wallet
 
 When the hook's next owner is a plain wallet rather than a Safe, it funds with `script/fund.sh`.
@@ -101,7 +101,6 @@ funded and the borrowed code is still cleared. A dry run that fails at the ancho
 (`TargetNotReached`) means others' liquidity between the moved price and the oracle costs more
 than `ANCHOR_MAX0/1` to cross: raise them; that trade is at a better price than the oracle's. Rehearse the day first: `script/mainnet/rehearse-fork.sh` runs the exact commands
 on a local fork with throwaway keys, including an attacker moving the empty pool.
-
 
 ## Operator notes
 

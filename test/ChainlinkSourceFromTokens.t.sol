@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// ChainlinkSource is built from the token its feed prices and the pool's other token (audit A-6):
+// ChainlinkSource is built from the token its feed prices and the pool's other token:
 // it reads their decimals and works out which way up the price goes from their addresses.
 
 import {Test} from "forge-std/Test.sol";

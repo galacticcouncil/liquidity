@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 // The in-swap recenter: it fires on the swap that makes it due, it never fails that swap, and it
-// leaves the trader's amounts alone. Written by Claude at Yash's request (2026-09-23).
+// leaves the trader's amounts alone.
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -255,7 +255,7 @@ contract BandHookAfterSwapTest is Test {
         assertEq(_centre(i), UP_4PCT_TICK, "it recovers on the next swap");
     }
 
-    /// Blind pass F3: a payment that "succeeds" one wei short would leave the hook owing the
+    /// A payment that "succeeds" one wei short would leave the hook owing the
     /// PoolManager, failing the trader's unlock after afterSwap has returned. The check inside the
     /// attempt turns it into an undone attempt instead.
     function test_aTokenThatPaysShort_isUndoneAndTheSwapGoesThrough() public {
@@ -284,7 +284,7 @@ contract BandHookAfterSwapTest is Test {
         _assertCoreMatchesManager(k, i);
     }
 
-    /// Blind pass F1: a router that pays in before it swaps still has its payment open while our
+    /// A router that pays in before it swaps still has its payment open while our
     /// hook runs. Syncing over it would break its settle, so the hook leaves this swap alone.
     function test_aRouterThatPaysBeforeSwapping_stillWorks() public {
         hook.fund(id, FUND, FUND);

@@ -50,8 +50,8 @@ contract Poker is IPoke {
     }
 }
 
-/// The price the guard checks must be the price the mint uses. Audit finding R8:
-/// the guard used to run in fund(), two external token calls before the mint read
+/// The price the guard checks must be the price the mint uses. The guard used to run in
+/// fund(), two external token calls before the mint read
 /// the price again, so a token that runs code mid-transfer could move it in between.
 contract BandHookGateInsideUnlockTest is Test {
     using PoolIdLibrary for PoolKey;

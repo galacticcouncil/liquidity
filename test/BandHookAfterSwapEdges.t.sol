@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// The blind pass's edge cases for the in-swap recenter (F8, F9; F6 is with the band edges in
-// BandHookAfterSwapReview) and the one place the "a swap always goes through" rule can still be
-// broken: a long route after our pool. Written by Claude at Yash's request (2026-09-23).
+// Edge cases for the in-swap recenter (the band edges are in BandHookAfterSwapReview) and the one
+// place the "a swap always goes through" rule can still be broken: a long route after our pool.
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -56,7 +55,7 @@ contract BandHookAfterSwapEdgesTest is Test {
         hook = BandHook(payable(HOOK_ADDR));
     }
 
-    // ---------- F9: code inside the hook's payment clears the shared sync slot
+    // ---------- code inside the hook's payment clears the shared sync slot
 
     function test_F9_codeThatClearsTheSyncSlotMidPayment_isUndone() public {
         CallbackOnTransferERC20 x = new CallbackOnTransferERC20("CA", "CA");
@@ -82,7 +81,7 @@ contract BandHookAfterSwapEdgesTest is Test {
         assertEq(_centre(i), 0, "nothing moved");
     }
 
-    // ---------- F8: a huge revert inside the attempt
+    // ---------- a huge revert inside the attempt
 
     /// The token reverts with 64 KB when the hook pays the PoolManager. The hook's own transfer
     /// check copies that into the attempt's memory and fails with TransferFailed; the outer raw

@@ -387,7 +387,7 @@ contract BandHookFundBurnsOldCoreTest is Test {
         assertEq(heldByManager(lo1, hi1, CORE_SALT), 0, "old band still empty");
     }
 
-    /// 9. Alice funds while the feed has gone quiet. Audit finding C1: this used to centre
+    /// 9. Alice funds while the feed has gone quiet. This used to centre
     /// the band on the pool price, which is a number a stranger can set for free. It refuses.
     function test_staleOracle_fundIsRefused() public {
         hook.fund(id, FUND, FUND);

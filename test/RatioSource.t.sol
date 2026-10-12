@@ -114,7 +114,7 @@ contract RatioSourceTest is Test {
     }
 
     /// 9. A stalled fast feed is caught by its own limit, although the slow feed is older and inside
-    /// its own. Exactly at the limit still prices; one second past it is no price (audit C-7).
+    /// its own. Exactly at the limit still prices; one second past it is no price.
     function test_aStalledFastFeed_isCaughtByItsOwnLimit() public {
         RatioSource src = _ethHdx();
         ethUsd.set(2400e8, block.timestamp - 20 hours);
@@ -142,7 +142,7 @@ contract RatioSourceTest is Test {
         assertEq(p, 0, "past 28h: no price");
     }
 
-    /// 11. A feed dated in the future cannot hide behind the other feed's older time (audit C-3).
+    /// 11. A feed dated in the future cannot hide behind the other feed's older time.
     function test_aFeedFromTheFuture_isNoPrice() public {
         RatioSource src = _ethHdx();
         hdxUsd.set(1e6, block.timestamp + 30 days);

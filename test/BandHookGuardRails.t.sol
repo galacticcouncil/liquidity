@@ -20,9 +20,9 @@ import {MockPriceSource} from "./mocks/MockPriceSource.sol";
 
 /// Five guard rails, none of which fires at the launch values, all of which make a
 /// bad state unreachable on a contract that cannot be upgraded.
-/// R7 and R11: the guard, the trigger and staleAfter bounded against the band and the clock.
-/// R9: the hook checks its own permission bits. R10: the freshness check subtracts.
-/// R13: the native settle syncs first, as v4-core instructs.
+/// The guard, the trigger and staleAfter bounded against the band and the clock.
+/// The hook checks its own permission bits. The freshness check subtracts.
+/// The native settle syncs first, as v4-core instructs.
 contract BandHookGuardRailsTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -134,7 +134,7 @@ contract BandHookGuardRailsTest is Test {
         revert("no swap event");
     }
 
-    // ---------- R9: the hook checks its own address
+    // ---------- the hook checks its own address
 
     /// A hook deployed anywhere but a correctly mined address refuses to exist. Without
     /// this the PoolManager accepts it, the pool works, and every swap is charged 0 ppm.
@@ -149,7 +149,7 @@ contract BandHookGuardRailsTest is Test {
         assertEq(address(hook), HOOK_ADDR, "and the hook lives there");
     }
 
-    // ---------- R10: the freshness check subtracts
+    // ---------- the freshness check subtracts
 
     /// A timestamp at the top of uint256 used to make `updatedAt + staleAfter` overflow
     /// inside beforeSwap, which stopped every swap in the pool.
@@ -176,7 +176,7 @@ contract BandHookGuardRailsTest is Test {
         assertGt(_swapFee(key), 3000, "the divergence term is applied");
     }
 
-    // ---------- R7 and R11: the guard and the trigger live inside the band
+    // ---------- the guard and the trigger live inside the band
 
     function test_R7_guardAtTheBandWidth_isRejected() public {
         BandHook.PoolConfig memory c = _base();
@@ -217,7 +217,7 @@ contract BandHookGuardRailsTest is Test {
     }
 
     /// The launch configurations as issue #2 set them all pass these rails too: ETH/HOLLAR
-    /// guard 200, and HDX guard 300 (R4's proposal, now adopted).
+    /// guard 200, and HDX guard 300.
     function test_theLaunchValuesValidate() public {
         BandHook.PoolConfig memory eth = _base();
         eth.feeFloor = 800; eth.feeCap = 10000; eth.staleAfter = 100800;
@@ -227,11 +227,11 @@ contract BandHookGuardRailsTest is Test {
 
         BandHook.PoolConfig memory hdx = _base();
         hdx.staleAfter = 7200; hdx.halfBandTicks = 1000; hdx.backstopHalfTicks = 16000;
-        hdx.backstopBps = 3500; hdx.triggerTicks = 500; hdx.guardTicks = 300; // R4's proposal
+        hdx.backstopBps = 3500; hdx.triggerTicks = 500; hdx.guardTicks = 300;
         hook.configure(_freshKey(200), hdx);
     }
 
-    // ---------- R13: the native settle syncs first
+    // ---------- the native settle syncs first
 
     /// Somebody syncs another currency earlier in the same transaction. Without the hook's
     /// own sync, v4 takes the ERC20 path and the native settle reverts NonzeroNativeValue.

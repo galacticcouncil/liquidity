@@ -285,8 +285,8 @@ contract BandHookExtendLowerClampsTest is Test {
         assertGt(cliq, 0, "the mirror direction still places liquidity");
     }
 
-    /// Audit finding R1. With exactly zero of the scarce token the core can place nothing. Part
-    /// one refused the recentre; part two (issue #3) places the held token as a one-sided limit,
+    /// With exactly zero of the scarce token the core can place nothing. A first
+    /// fix refused the recentre; issue #3 places the held token as a one-sided limit,
     /// so the recentre goes through and nothing is stranded.
     function test_recenter_withoutDust_placesTheHeldTokenAsALimit() public {
         hook.fund(id, BASE, BASE);

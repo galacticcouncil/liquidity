@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// The owner can recover anything that lands in the hook (audit A-5): ETH on a hook whose pool has
+// The owner can recover anything that lands in the hook: ETH on a hook whose pool has
 // no ETH leg, a stray token, or a donation of a pool's own token, without touching the positions.
 
 import {Test} from "forge-std/Test.sol";

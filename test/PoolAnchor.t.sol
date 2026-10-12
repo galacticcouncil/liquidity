@@ -243,7 +243,7 @@ contract PoolAnchorTest is Test {
         helper.unlockCallback("");
     }
 
-    // ---------- a pool parked at the very edge (review issue 1)
+    // ---------- a pool parked at the very edge
 
     /// 9. Mallory parks an empty pool on the floor; Alice anchors it up to tick 1200, then the hook funds.
     function test_fromTheFloor_anchorsOntoTheTarget() public {
@@ -298,7 +298,7 @@ contract PoolAnchorTest is Test {
         assertEq(address(helper).balance, 0, "the helper keeps no ETH");
     }
 
-    // ---------- one cap per token, and nothing to do (review issue 2)
+    // ---------- one cap per token, and nothing to do
 
     /// 13. An ETH pool already on the target: the ETH sent along comes back in full.
     function test_nativePoolAlreadyAtTheTarget_returnsAllTheEth() public {

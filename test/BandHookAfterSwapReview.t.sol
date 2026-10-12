@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// The gaps the independent code review listed: both band edges and just inside them (with the
-// blind pass's F6), native pay-in, running out of gas inside the attempt, a failure that repeats,
-// the manager check, `setParams` and the switch, two swaps in one unlock.
-// Written by Claude at Yash's request (2026-09-23).
+// Further cases for the in-swap recenter: both band edges and just inside them, native pay-in,
+// running out of gas inside the attempt, a failure that repeats, the manager check, `setParams`
+// and the switch, two swaps in one unlock.
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -59,7 +58,7 @@ contract BandHookAfterSwapReviewTest is Test {
         hook = BandHook(payable(HOOK_ADDR));
     }
 
-    // ---------- gaps 1 and 2, and blind pass F6: both band edges, and just inside them
+    // ---------- both band edges, and just inside them
 
     /// Token1 is the scarce side at funding, so none of it stays idle; the oracle sits 100 ticks
     /// above the lower edge, so the recenter is due and the edge is inside the guard. The pool is
@@ -126,7 +125,7 @@ contract BandHookAfterSwapReviewTest is Test {
         assertEq(tick, hi - 1);
     }
 
-    /// Blind pass F6: stopping exactly on the upper edge from above reports the tick below it, so
+    /// Stopping exactly on the upper edge from above reports the tick below it, so
     /// a tick test reads "inside the band" while the band holds only token1. The recenter leaves
     /// no core and a bid holding the token1.
     function test_upperEdge_exactlyOnItFromAbove_recentersLikeTheManualPath() public {
@@ -140,7 +139,7 @@ contract BandHookAfterSwapReviewTest is Test {
         assertGt(limLiq, 0, "a bid holds the token1");
     }
 
-    /// Was a known limit before issue #3 (audit R1 part two): a few ticks inside the edge the band
+    /// Was a known limit before issue #3: a few ticks inside the edge the band
     /// holds only a little of the scarce token, so the new core is thin. The rest used to wait
     /// idle; now the limit holds it.
     function test_aFewTicksInsideTheEdge_theCoreIsThin_andTheLimitHoldsTheRest() public {

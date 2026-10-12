@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 // The in-swap recenter on a fork of Robinhood Chain: the real PoolManager, the real Chainlink
 // ETH/USD feed, and trades sent through Uniswap's deployed Universal Router with Permit2. Gas is
-// read per call, so run with `forge test --isolate`. Written by Claude at Yash's request (2026-09-23).
+// read per call, so run with `forge test --isolate`.
 
 import {Test} from "forge-std/Test.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";

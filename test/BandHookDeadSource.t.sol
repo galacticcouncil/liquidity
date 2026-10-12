@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// What a pool does while its price source fails (audit A-7/B-1/C-4): swaps continue at the fee
+// What a pool does while its price source fails: swaps continue at the fee
 // cap, nothing is placed, and the pool recovers by itself when the source answers again.
 
 import {Test, Vm} from "forge-std/Test.sol";
