@@ -41,7 +41,8 @@ file per pool from its example: `.env.eth-hollar`, `.env.hdx-hollar`,
 Per pool: `00`, `01`, then `03` hands the hook to the Safe **before any
 funding**, and the Safe accepts. A plain wallet can be the owner instead; see
 [Funding from a wallet](#funding-from-a-wallet). ETH/HOLLAR's live launch runs from
-`script/mainnet/eth-hollar.env`, the file the owner's check compares the hook against. The Safe holds the capital; the deploy key
+`script/mainnet/eth-hollar.env`, the file the owner's check compares the hook against; the
+owner's step-by-step guide is `script/mainnet/FUNDING.md`. The Safe holds the capital; the deploy key
 never does. `SafeFund` then writes one batch for the Safe: approve, anchor,
 approve, fund.
 
