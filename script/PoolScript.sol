@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// What the per-pool scripts share: the pool key built from the pool's settings file, and the
-// oracle price read the way the hook reads it, as a pool price and tick.
+// What the per-pool scripts share: the pool key and the hook settings built from the pool's settings
+// file, and the oracle price read the way the hook reads it, as a pool price and tick.
 
 import {Script} from "forge-std/Script.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
@@ -11,6 +11,7 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
+import {BandHook} from "../src/BandHook.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 
 abstract contract PoolScript is Script {
@@ -27,6 +28,24 @@ abstract contract PoolScript is Script {
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
             tickSpacing: int24(int256(vm.envInt("TICK_SPACING"))),
             hooks: IHooks(hook)
+        });
+    }
+
+    /// @dev The hook settings from the pool's settings file, on `source`.
+    function _configFromEnv(IPriceSource source) internal view returns (BandHook.PoolConfig memory) {
+        return BandHook.PoolConfig({
+            source: source,
+            feeFloor: uint24(vm.envUint("FEE_FLOOR_PPM")),
+            feeCap: uint24(vm.envUint("FEE_CAP_PPM")),
+            feeSlopePpm: uint32(vm.envUint("FEE_SLOPE_PPM")),
+            staleAfter: uint32(vm.envUint("STALE_AFTER_S")),
+            halfBandTicks: int24(int256(vm.envInt("HALF_BAND_TICKS"))),
+            backstopHalfTicks: int24(int256(vm.envInt("BACKSTOP_HALF_TICKS"))),
+            backstopBps: uint16(vm.envUint("BACKSTOP_BPS")),
+            triggerTicks: int24(int256(vm.envInt("TRIGGER_TICKS"))),
+            guardTicks: int24(int256(vm.envInt("GUARD_TICKS"))),
+            enabled: true,
+            autoRecenter: vm.envOr("AUTO_RECENTER", false)
         });
     }
 

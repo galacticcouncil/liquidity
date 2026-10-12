@@ -14,6 +14,8 @@ Audit + fixes: PR #1 (merged 2026-09-18).
 - `src/sources/` — `ChainlinkSource` (one feed, built from the token it prices and the pool's other token), `RatioSource` (two USD feeds, each named with the token it prices; the ETH/HDX source). Both read the tokens' decimals and work out the orientation themselves
 - `script/00`, `01`, `03` — per pool: deploy its hook (CREATE2 salt-mined to the flag bits), set it up (source, expected-tick check, configure, initialize), hand it to the Safe
 - `script/SafeFund.s.sol` — writes the Safe batch that anchors the pool price onto the oracle and funds it in one transaction
+- `script/WalletFund.s.sol`, `script/fund.sh` — the same funding from a plain wallet, as one EIP-7702 transaction: `check`, then `send`
+- `script/mainnet/` — ETH/HOLLAR's settings for the live chain, and a rehearsal of the whole launch on a local fork
 - `script/PoolAnchor.sol` — the helper the batch calls to move the pool price onto the oracle
 - `test/` — unit tests (ERC20 + native pools, audit regression suites) and fork tests against the live PoolManager, including the whole per-pool routine
 
@@ -38,7 +40,9 @@ file per pool from its example: `.env.eth-hollar`, `.env.hdx-hollar`,
 ## Run order
 
 Per pool: `00`, `01`, then `03` hands the hook to the Safe **before any
-funding**, and the Safe accepts. The Safe holds the capital; the deploy key
+funding**, and the Safe accepts. A plain wallet can be the owner instead; see
+[Funding from a wallet](#funding-from-a-wallet). ETH/HOLLAR's live launch runs from
+`script/mainnet/eth-hollar.env`, the file the owner's check compares the hook against. The Safe holds the capital; the deploy key
 never does. `SafeFund` then writes one batch for the Safe: approve, anchor,
 approve, fund.
 
@@ -71,6 +75,33 @@ forge script script/SafeFund.s.sol --rpc-url robinhood --broadcast           # o
 
 Handover verification, for every hook, before the Safe funds it: assert `owner` is the Safe,
 `pendingOwner` is zero, and the deploy key holds no role of any kind.
+## Funding from a wallet
+
+When the hook's next owner is a plain wallet rather than a Safe, it funds with `script/fund.sh`.
+The wallet borrows the code of Simple7702Account (eth-infinitism, ERC-4337 v0.8, already on
+Robinhood Chain) for one EIP-7702 transaction that runs acceptOwnership, approve, anchor, approve,
+fund, so nobody can move the price between the anchor and the fund; a second transaction clears
+the borrowed code, and the wallet is plain again.
+
+ETH/HOLLAR's settings live in `script/mainnet/eth-hollar.env` (no keys). The deployer fills
+`HOOK` and `EXPECTED_TICK` and runs `00`, `01` and `03` from it (commands at its top); `03` offers
+the hook to `NEW_OWNER`. `FUND_ETH` is the ETH to deposit; HOLLAR of equal value at the oracle
+price is added. Then, from the owner's wallet:
+
+```sh
+echo "PRIVATE_KEY=0x..." > .env   # the owner's wallet; .env is gitignored
+script/fund.sh check              # reads only: every check and a dry run of the transaction
+script/fund.sh send               # anchor deployment, the one transaction, clearing, checks after
+```
+
+`check` refuses, saying why, when the chain, the key, the hook's owner or settings, the price
+source, the feed's age or the wallet's balances do not match the file, or when the wallet already
+carries EIP-7702 code of its own, or the pool is already funded. If the batch fails, nothing is
+funded and the borrowed code is still cleared. A dry run that fails at the anchor
+(`TargetNotReached`) means others' liquidity between the moved price and the oracle costs more
+than `ANCHOR_MAX0/1` to cross: raise them; that trade is at a better price than the oracle's. Rehearse the day first: `script/mainnet/rehearse-fork.sh` runs the exact commands
+on a local fork with throwaway keys, including an attacker moving the empty pool.
+
 
 ## Operator notes
 

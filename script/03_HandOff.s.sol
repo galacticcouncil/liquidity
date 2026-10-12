@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// Begins the 2-step ownership transfer of one pool's hook to the final owner (multisig).
-// Run once per pool, right after 01 and before any funding, with that pool's settings loaded;
-// the multisig must then call acceptOwnership() on each hook itself, and funds it with SafeFund.
+// Begins the 2-step ownership transfer of one pool's hook to its next owner, NEW_OWNER.
+// Run once per pool, right after 01 and before any funding, with that pool's settings loaded.
+// A Safe then calls acceptOwnership() and funds with SafeFund; a plain wallet runs script/fund.sh,
+// which accepts and funds in one transaction.
 //
 //   set -a; source .env.eth-hollar; set +a
 //   forge script script/03_HandOff.s.sol --rpc-url robinhood --broadcast
@@ -22,6 +23,6 @@ contract HandOff is Script {
         vm.stopBroadcast();
 
         console2.log("pending owner set:", newOwner);
-        console2.log("ACTION REQUIRED: multisig must call acceptOwnership()");
+        console2.log("next: the new owner accepts (a Safe: acceptOwnership(); a wallet: script/fund.sh)");
     }
 }

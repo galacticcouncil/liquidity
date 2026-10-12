@@ -36,7 +36,7 @@ contract SafeFund is PoolScript {
         bytes data;
     }
 
-    function run() external {
+    function run() external virtual {
         BandHook hook = BandHook(payable(vm.envAddress("HOOK")));
         PoolKey memory key = _poolKey(address(hook));
         PoolId id = key.toId();

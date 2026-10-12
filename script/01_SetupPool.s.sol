@@ -107,23 +107,6 @@ contract SetupPool is PoolScript {
         }
     }
 
-    function _configFromEnv(IPriceSource source) internal view returns (BandHook.PoolConfig memory) {
-        return BandHook.PoolConfig({
-            source: source,
-            feeFloor: uint24(vm.envUint("FEE_FLOOR_PPM")),
-            feeCap: uint24(vm.envUint("FEE_CAP_PPM")),
-            feeSlopePpm: uint32(vm.envUint("FEE_SLOPE_PPM")),
-            staleAfter: uint32(vm.envUint("STALE_AFTER_S")),
-            halfBandTicks: int24(int256(vm.envInt("HALF_BAND_TICKS"))),
-            backstopHalfTicks: int24(int256(vm.envInt("BACKSTOP_HALF_TICKS"))),
-            backstopBps: uint16(vm.envUint("BACKSTOP_BPS")),
-            triggerTicks: int24(int256(vm.envInt("TRIGGER_TICKS"))),
-            guardTicks: int24(int256(vm.envInt("GUARD_TICKS"))),
-            enabled: true,
-            autoRecenter: vm.envOr("AUTO_RECENTER", false)
-        });
-    }
-
     /// @dev Somebody initialized the pool before us. The SafeFund batch anchors it onto the oracle
     /// before it funds, wherever it sits, so this only reports how far off it is.
     function _reportExistingPool(int24 poolTick, int24 oracleTick) internal view {
