@@ -3,10 +3,10 @@ pragma solidity 0.8.26;
 
 // Deploys what Robinhood testnet lacks, so the real launch scripts can run there: HDX and HOLLAR
 // stand-ins (HDX at the lower address, as on mainnet), ETH/USD and HDX/USD feeds at today's mainnet
-// prices, and a byte-for-byte copy of mainnet's Simple7702Account; then mints tokens to Ben and Malory.
+// prices, and a byte-for-byte copy of mainnet's Simple7702Account; then mints tokens to the owner and the attacker.
 // Run by script/testnet/rehearse.sh, which fetches the answers and the code from mainnet:
 //
-//   env: PRIVATE_KEY (Yash), BEN, MALORY, ETH_USD_ANSWER, HDX_USD_ANSWER (8 decimals), SIMPLE7702_CODE
+//   env: PRIVATE_KEY (the deployer), OWNER, ATTACKER, ETH_USD_ANSWER, HDX_USD_ANSWER (8 decimals), SIMPLE7702_CODE
 //
 // Writes broadcast/testnet/<chain id>/standins.env with the addresses.
 
@@ -42,7 +42,7 @@ contract DeployStandIns is Script {
         TestFeed ethUsd = new TestFeed(8, vm.envInt("ETH_USD_ANSWER"));
         TestFeed hdxUsd = new TestFeed(8, vm.envInt("HDX_USD_ANSWER"));
         address simple7702 = _copy(runtime);
-        address[2] memory people = [vm.envAddress("BEN"), vm.envAddress("MALORY")];
+        address[2] memory people = [vm.envAddress("OWNER"), vm.envAddress("ATTACKER")];
         for (uint256 i; i < 2; i++) {
             hdx.mint(people[i], MINT_HDX);
             hollar.mint(people[i], MINT_HOLLAR);

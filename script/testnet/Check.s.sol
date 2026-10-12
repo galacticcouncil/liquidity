@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// Proves one pool of the testnet rehearsal came out right after Ben funded it: Ben owns the hook,
-// the pool price sits on the oracle, his liquidity is placed, and his wealth (wallet plus what the
-// hook holds, valued at the oracle price) fell by no more than gas. If his anchor had to trade
+// Proves one pool of the testnet rehearsal came out right after the owner funded it: the owner owns the
+// hook, the pool price sits on the oracle, its liquidity is placed, and its wealth (wallet plus what the
+// hook holds, valued at the oracle price) fell by no more than gas. If its anchor had to trade
 // through someone else's liquidity, the most it may cost is the fee cap on the anchor's spend cap.
-// Read-only; rehearse.sh runs it per pool with that pool's settings and Ben's numbers loaded:
+// Read-only; rehearse.sh runs it per pool with that pool's settings and the owner's numbers loaded:
 //
-//   env: the pool's settings, BEN, BEN_BEFORE_0/1, BEN_AFTER_0/1 (raw balances around his batch),
-//        BEN_GAS_WEI (what his batch and clear transactions cost)
+//   env: the pool's settings, OWNER, OWNER_BEFORE_0/1, OWNER_AFTER_0/1 (raw balances around its batch),
+//        OWNER_GAS_WEI (what its batch and clear transactions cost)
 
 import {console2} from "forge-std/Script.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
@@ -29,14 +29,14 @@ contract Check is PoolScript {
         BandHook hook = BandHook(payable(vm.envAddress("HOOK")));
         PoolKey memory key = _poolKey(address(hook));
         PoolId id = key.toId();
-        address ben = vm.envAddress("BEN");
-        require(hook.owner() == ben && hook.pendingOwner() == address(0), "Ben does not own the hook");
+        address owner = vm.envAddress("OWNER");
+        require(hook.owner() == owner && hook.pendingOwner() == address(0), "the owner does not own the hook");
 
         (uint256 px, uint160 sqrtP, uint24 feeCap) = _checkOnOracle(hook, id);
 
         (,,, uint128 coreLiq) = hook.core(id);
         (,,, uint128 backstopLiq) = hook.backstop(id);
-        require(coreLiq > 0 && backstopLiq > 0, "Ben's liquidity is not placed");
+        require(coreLiq > 0 && backstopLiq > 0, "the owner's liquidity is not placed");
 
         (uint256 held0, uint256 held1) = _held(hook, key, id, sqrtP);
         _checkWealth(px, held0, held1, feeCap, key.currency0.isAddressZero());
@@ -80,12 +80,12 @@ contract Check is PoolScript {
         a1 += key.currency1.balanceOf(address(hook));
     }
 
-    /// @dev Ben's wallet plus the hook's holdings, valued in token1 at the oracle price, before and
-    /// after his batch. Gas is added back: it is a cost, not a loss to anyone.
+    /// @dev The owner's wallet plus the hook's holdings, valued in token1 at the oracle price, before and
+    /// after its batch. Gas is added back: it is a cost, not a loss to anyone.
     function _checkWealth(uint256 px, uint256 held0, uint256 held1, uint24 feeCap, bool native) internal view {
-        uint256 gas0 = native ? vm.envUint("BEN_GAS_WEI") : 0;
-        int256 spent0 = int256(vm.envUint("BEN_BEFORE_0")) - int256(vm.envUint("BEN_AFTER_0") + gas0);
-        int256 spent1 = int256(vm.envUint("BEN_BEFORE_1")) - int256(vm.envUint("BEN_AFTER_1"));
+        uint256 gas0 = native ? vm.envUint("OWNER_GAS_WEI") : 0;
+        int256 spent0 = int256(vm.envUint("OWNER_BEFORE_0")) - int256(vm.envUint("OWNER_AFTER_0") + gas0);
+        int256 spent1 = int256(vm.envUint("OWNER_BEFORE_1")) - int256(vm.envUint("OWNER_AFTER_1"));
         int256 spentValue = spent1 + spent0 * int256(px) / 1e18;
         int256 heldValue = int256(held1 + held0 * px / 1e18);
         int256 loss = spentValue - heldValue;
@@ -100,11 +100,11 @@ contract Check is PoolScript {
             allowed += capValue * feeCap / 1e6;
         }
         console2.log("anchor traded:", anchorTraded);
-        console2.log("Ben spent, token0 raw:", spent0);
-        console2.log("Ben spent, token1 raw:", spent1);
+        console2.log("the owner spent, token0 raw:", spent0);
+        console2.log("the owner spent, token1 raw:", spent1);
         console2.log("deposit value (token1 raw):", deposit);
         console2.log("loss (token1 raw):", loss);
         console2.log("allowed (token1 raw):", allowed);
-        require(loss <= int256(allowed), "Ben lost more than allowed");
+        require(loss <= int256(allowed), "the owner lost more than allowed");
     }
 }
