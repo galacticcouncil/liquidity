@@ -6,6 +6,9 @@ much to deposit, run one check, then one send. About 15 minutes, most of it inst
 
 You end up owning the hook, with your ETH and HOLLAR placed in the pool at the oracle price.
 
+Wallet on a Ledger? Its key never leaves the device, so step 3 cannot work. Use the console in `ui/`
+instead, from MetaMask with the Ledger: `ui/fund_ui.md`.
+
 ## What you need first
 
 - The wallet the hook was offered to: `NEW_OWNER` in `script/mainnet/eth-hollar.env`

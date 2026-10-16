@@ -16,6 +16,7 @@ Audit + fixes: PR #1 (merged 2026-09-18).
 - `script/PoolAnchor.sol` — the helper the batch calls to move the pool price onto the oracle
 - `script/WalletFund.s.sol`, `script/fund.sh` — the same funding from a plain wallet, as one EIP-7702 transaction: `check`, then `send`
 - `script/mainnet/` — ETH/HOLLAR's settings for the live chain, and a rehearsal of the whole launch on a local fork
+- `ui/` — the owner's console in the browser: funds from MetaMask, a Ledger too, and makes every other hook call (`ui/README.md`)
 - `test/` — unit tests (ERC20 + native pools, audit regression suites) and fork tests against the live PoolManager, including the whole per-pool routine
 
 ## Prerequisites
@@ -83,6 +84,9 @@ The wallet borrows the code of Simple7702Account (eth-infinitism, ERC-4337 v0.8,
 Robinhood Chain) for one EIP-7702 transaction that runs acceptOwnership, approve, anchor, approve,
 fund, so nobody can move the price between the anchor and the fund; a second transaction clears
 the borrowed code, and the wallet is plain again.
+
+A wallet on a Ledger has no key to put in `.env`: it funds from the console in `ui/` instead, the same
+calls as plain transactions with the anchor right before the deposit (step by step: `ui/fund_ui.md`).
 
 ETH/HOLLAR's settings live in `script/mainnet/eth-hollar.env` (no keys). The deployer fills
 `HOOK` and `EXPECTED_TICK` and runs `00`, `01` and `03` from it (commands at its top); `03` offers
