@@ -27,7 +27,7 @@ contract BandHookSafeTransferTest is Test {
     MockPriceSource source;
     BandHook hook;
 
-    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
+    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
     uint256 constant FUND = 100_000e18;
 
     function setUp() public {
@@ -48,8 +48,9 @@ contract BandHookSafeTransferTest is Test {
             backstopHalfTicks: 16000,
             backstopBps: 3000,
             triggerTicks: 500,
-            guardTicks: 100,
-            enabled: true
+            guardTicks: 300,
+            enabled: true,
+            autoRecenter: false
         });
     }
 
@@ -184,5 +185,23 @@ contract BandHookSafeTransferTest is Test {
         (,,, uint128 bliq) = hook.backstop(id);
         assertEq(cliq, 0, "no core recorded");
         assertEq(bliq, 0, "no backstop recorded");
+    }
+
+    // ---------- an address with no code (issue #2)
+
+    /// Bob funds a pool whose token address holds no contract: TransferFailed, nothing recorded.
+    /// The old helpers treated the empty return as success and failed later, with no reason.
+    function test_fund_revertsWhenATokenHasNoCode() public {
+        MockERC20 good = new MockERC20("GOOD", "GOOD", 18);
+        address ghost = makeAddr("no contract here");
+        (, PoolId id) = _makePool(ghost, address(good));
+        uint256 before = _balance(address(good), address(this));
+
+        vm.expectRevert(BandHook.TransferFailed.selector);
+        hook.fund(id, FUND, FUND);
+
+        assertEq(_balance(address(good), address(this)), before, "Bob keeps the real token");
+        (,,, uint128 cliq) = hook.core(id);
+        assertEq(cliq, 0, "no core recorded");
     }
 }
