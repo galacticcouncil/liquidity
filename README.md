@@ -176,8 +176,8 @@ about 12k for the checks.
 ## Post-launch monitoring
 
 `recenter(poolId)` is permissionless (~490k gas on a Robinhood fork) and safe to call blindly —
-the guards decide. Watchdog principle: **alert on work that was due, not on
-quiet inactivity** —
+the guards decide. `keeper/` calls it on a timer; see `keeper/README.md`. Watchdog principle:
+**alert on work that was due, not on quiet inactivity** —
 
 - recenter conditions held for > N minutes with no recenter executed,
 - feed `updatedAt` older than its heartbeat + margin,
