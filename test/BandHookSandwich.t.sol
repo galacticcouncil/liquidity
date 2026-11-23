@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-// The sandwich around a recenter, measured. Inside one unlock an attacker pushes the
-// pool to the edge of the guard, lets the recenter happen at that price, and trades back. Profit is
-// valued at the oracle price. Compared with the same two trades and no recenter, and with the manual
-// path (three separate transactions).
+// The sandwich around a recenter, measured. An attacker pushes the pool to the edge of the guard,
+// calls the permissionless recenter at that price, and trades back. Profit is valued at the oracle
+// price. Compared with the same two trades and no recenter.
 
 import {Test} from "forge-std/Test.sol";
-import {Vm} from "forge-std/Vm.sol";
 import {PoolManager} from "v4-core/PoolManager.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
@@ -81,9 +79,8 @@ contract BandHookSandwichTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     uint256 constant FUND = 100_000e18; // 200k of value at price 1
-    bytes32 constant RECENTERED = keccak256("Recentered(bytes32,int24,int24,int24,uint128)");
 
     IPoolManager manager;
     PoolSwapTest pusher;
@@ -123,7 +120,7 @@ contract BandHookSandwichTest is Test {
         id = key.toId();
     }
 
-    function _cfg(int24 guard, bool autoOn) internal view returns (BandHook.PoolConfig memory) {
+    function _cfg(int24 guard) internal view returns (BandHook.PoolConfig memory) {
         return BandHook.PoolConfig({
             source: IPriceSource(address(source)),
             feeFloor: 800,
@@ -135,18 +132,14 @@ contract BandHookSandwichTest is Test {
             backstopBps: 3500,
             triggerTicks: 350,
             guardTicks: guard,
-            enabled: true,
-            autoRecenter: autoOn
+            enabled: true
         });
     }
 
-    /// Fund at tick 0, move the oracle to `oraclePrice`, let arbitrage (switch off) bring the pool to
-    /// `startTick`, and optionally leave spare tokens in the hook, so the recenter is due for
-    /// whoever trades next.
-    function _stage(int24 guard, bool autoOn, uint256 oraclePrice, int24 startTick, uint256 idle0, uint256 idle1)
-        internal
-    {
-        hook.configure(key, _cfg(guard, false));
+    /// Fund at tick 0, move the oracle to `oraclePrice`, let arbitrage bring the pool to
+    /// `startTick`, and optionally leave spare tokens in the hook, so a recenter is due.
+    function _stage(int24 guard, uint256 oraclePrice, int24 startTick, uint256 idle0, uint256 idle1) internal {
+        hook.configure(key, _cfg(guard));
         manager.initialize(key, TickMath.getSqrtPriceAtTick(0));
         hook.fund(id, FUND, FUND);
         source.set(oraclePrice, block.timestamp);
@@ -158,25 +151,6 @@ contract BandHookSandwichTest is Test {
         );
         if (idle0 > 0) t0.transfer(HOOK_ADDR, idle0);
         if (idle1 > 0) t1.transfer(HOOK_ADDR, idle1);
-        if (autoOn) hook.setAutoRecenter(id, true);
-    }
-
-    /// Whether the hook emitted `Recentered` since the logs were last read. The core's centre is
-    /// not enough: since issue #3 a recenter past the band leaves an empty core and a bid.
-    function _recentered() internal view returns (bool) {
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        for (uint256 j = 0; j < logs.length; j++) {
-            if (logs[j].emitter == HOOK_ADDR && logs[j].topics[0] == RECENTERED) return true;
-        }
-        return false;
-    }
-
-    /// Where the last recenter centred what it placed: the core when it has one, else the limit.
-    function _placedCentre() internal view returns (int24) {
-        (,, int24 c, uint128 liq) = hook.core(id);
-        if (liq > 0) return c;
-        (,, int24 limC,) = hook.limit(id);
-        return limC;
     }
 
     /// Value in token1 at the oracle price.
@@ -196,45 +170,44 @@ contract BandHookSandwichTest is Test {
         uint256 idle1;
     }
 
-    /// Attacker's profit, per 1M of pool value, for: in-swap recenter, no recenter, manual recenter.
-    function _run(Case memory k) internal returns (int256 inSwap, int256 none, int256 manual, bool firedOnPush) {
+    /// Attacker's profit, per 1M of pool value, for: no recenter, and a recenter between the trades.
+    /// `fired` says whether the recenter went through at the pushed price.
+    function _run(Case memory k) internal returns (int256 none, int256 manual, bool fired) {
         uint256 snap = vm.snapshotState();
 
-        _stage(k.guard, true, k.oraclePrice, k.startTick, k.idle0, k.idle1);
+        _stage(k.guard, k.oraclePrice, k.startTick, k.idle0, k.idle1);
         int256 v0 = _value(address(sw), k.oraclePrice);
-        vm.recordLogs();
-        sw.run(key, k.pushTo, k.pushTo); // push only, to see whether the recenter fired on it
-        firedOnPush = _recentered();
-        if (firedOnPush) assertEq(_placedCentre(), k.oracleTick, "placed around the oracle, not the pushed price");
-        (, int24 t0_,,) = manager.getSlot0(id);
-        sw.run(key, t0_, k.unwindTo); // then the unwind (inside one unlock or two: same prices)
-        inSwap = (_value(address(sw), k.oraclePrice) - v0) * 5;
-        vm.revertToState(snap);
-
-        _stage(k.guard, false, k.oraclePrice, k.startTick, k.idle0, k.idle1);
-        v0 = _value(address(sw), k.oraclePrice);
         sw.run(key, k.pushTo, k.unwindTo);
         none = (_value(address(sw), k.oraclePrice) - v0) * 5;
         vm.revertToState(snap);
 
-        _stage(k.guard, false, k.oraclePrice, k.startTick, k.idle0, k.idle1);
+        _stage(k.guard, k.oraclePrice, k.startTick, k.idle0, k.idle1);
         v0 = _value(address(sw), k.oraclePrice);
         sw.run(key, k.pushTo, k.pushTo); // push only
-        try hook.recenter(id) {} catch {} // when refused here, a later one cannot touch this attack's prices
+        try hook.recenter(id) {
+            fired = true;
+            assertEq(_placedCentre(), k.oracleTick, "placed around the oracle, not the pushed price");
+        } catch {} // when refused here, a later one cannot touch this attack's prices
         (, int24 t,,) = manager.getSlot0(id);
         sw.run(key, t, k.unwindTo); // unwind only
         manual = (_value(address(sw), k.oraclePrice) - v0) * 5;
         vm.revertToState(snap);
     }
 
+    /// Where the last recenter centred what it placed: the core when it has one, else the limit.
+    function _placedCentre() internal view returns (int24) {
+        (,, int24 c, uint128 liq) = hook.core(id);
+        if (liq > 0) return c;
+        (,, int24 limC,) = hook.limit(id);
+        return limC;
+    }
+
     function _row(Case memory k) internal {
-        (int256 a, int256 b, int256 m, bool fired) = _run(k);
-        emit log_string(string.concat(k.label, fired ? "  [recentered on the push]" : "  [not on the push]"));
-        emit log_named_decimal_int("  attacker profit per 1M, in-swap recenter", a, 18);
+        (int256 b, int256 m, bool fired) = _run(k);
+        emit log_string(string.concat(k.label, fired ? "  [recentered on the push]" : "  [refused on the push]"));
         emit log_named_decimal_int("  attacker profit per 1M, no recenter", b, 18);
-        emit log_named_decimal_int("  attacker profit per 1M, manual recenter", m, 18);
-        emit log_named_decimal_int("  what the recenter adds", a - b, 18);
-        assertEq(a, m, "in-swap and manual recenter give the attacker the same result");
+        emit log_named_decimal_int("  attacker profit per 1M, recenter between", m, 18);
+        emit log_named_decimal_int("  what the recenter adds", m - b, 18);
     }
 
     function _c(string memory l, int24 g, uint256 p, int24 ot, int24 st, int24 pu, int24 un, uint256 i0, uint256 i1)

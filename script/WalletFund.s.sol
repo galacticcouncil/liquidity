@@ -83,7 +83,7 @@ contract WalletFund is SafeFund {
         PoolId id = s.key.toId();
         require(s.hook.owner() == s.owner && s.hook.pendingOwner() == address(0), "the wallet does not own the hook");
         require(s.owner.code.length == 0, "the wallet still has borrowed code: clear it");
-        (IPriceSource source,,,, uint32 staleAfter,,,,,,,) = s.hook.config(id);
+        (IPriceSource source,,,, uint32 staleAfter,,,,,,) = s.hook.config(id);
         (, int24 oracleTick) = _oracle(source, staleAfter);
         (, int24 poolTick,,) = MANAGER.getSlot0(id);
         require(_absDiff(poolTick, oracleTick) <= 1, "the pool is not on the oracle");
@@ -139,7 +139,7 @@ contract WalletFund is SafeFund {
     /// file says, with a live pool at the floor fee. Returns its settings.
     function _checkHook(Settings memory s, address wallet) internal view returns (BandHook.PoolConfig memory c) {
         require(
-            address(s.hook.manager()) == address(MANAGER) && uint160(address(s.hook)) & 0x3FFF == 0x10C0,
+            address(s.hook.manager()) == address(MANAGER) && uint160(address(s.hook)) & 0x3FFF == 0x1080,
             "HOOK is not a BandHook on this PoolManager"
         );
         require(s.hook.pendingOwner() == wallet || s.hook.owner() == wallet, "the hook is not offered to this wallet");
@@ -172,7 +172,6 @@ contract WalletFund is SafeFund {
         _same("TRIGGER_TICKS", c.triggerTicks, want.triggerTicks);
         _same("GUARD_TICKS", c.guardTicks, want.guardTicks);
         require(c.enabled, "the pool is not enabled on the hook");
-        require(c.autoRecenter == want.autoRecenter, "the hook's setting differs from the file: AUTO_RECENTER");
     }
 
     function _same(string memory name, uint256 actual, uint256 wanted) internal pure {

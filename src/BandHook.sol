@@ -8,7 +8,6 @@ import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency} from "v4-core/types/Currency.sol";
-import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/types/BeforeSwapDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "v4-core/types/PoolOperation.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
@@ -36,9 +35,9 @@ interface IERC20Minimal {
 /// oracle is used only to (a) drive a dynamic fee that rises when the pool price
 /// diverges from the reference, (b) gate re-centering so a manipulated pool price
 /// cannot drag the band, and (c) pick the new center. Anyone can call recenter();
-/// it only executes when the configured conditions hold. A pool that opts in with
-/// `autoRecenter` is also recentered at the end of the swap that makes it due; that
-/// attempt is skipped, never failing the swap, whenever it cannot complete. Third-party
+/// it only executes when the configured conditions hold. Swaps never move liquidity:
+/// recentering happens only in its own transaction, sent by a keeper or anyone else.
+/// The LP fee never exceeds `MAX_FEE`, a constant the owner cannot change. Third-party
 /// LPs join the pool through the ordinary PositionManager and are unaffected except for
 /// paying and earning the same dynamic fee.
 ///
@@ -56,7 +55,7 @@ contract BandHook is IUnlockCallback {
     struct PoolConfig {
         IPriceSource source;
         uint24 feeFloor; // ppm
-        uint24 feeCap; // ppm
+        uint24 feeCap; // ppm, at most MAX_FEE
         uint32 feeSlopePpm; // ppm of extra fee per 100% pool-vs-oracle divergence
         uint32 staleAfter; // seconds; an older price counts as no price: cap fee, nothing placed
         int24 halfBandTicks; // core band half-width
@@ -65,7 +64,6 @@ contract BandHook is IUnlockCallback {
         int24 triggerTicks; // recenter when |oracleTick - coreCenter| > trigger
         int24 guardTicks; // refuse recenter when |poolTick - oracleTick| > guard
         bool enabled; // fund and recenter only; swaps keep trading what is placed, withdraw stops that
-        bool autoRecenter; // also recenter at the end of a swap that makes it due
     }
 
     struct Pos {
@@ -100,9 +98,11 @@ contract BandHook is IUnlockCallback {
     bytes32 internal constant LIMIT_SALT = bytes32(uint256(2));
     // hard cap on asymmetric extension of the core band, in half-band multiples
     int24 internal constant MAX_EXTENSION_MULT = 4;
-    // the permission bits this hook's address must carry: afterInitialize | beforeSwap | afterSwap
-    uint160 internal constant HOOK_FLAGS =
-        Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG;
+    // the permission bits this hook's address must carry: afterInitialize | beforeSwap
+    uint160 internal constant HOOK_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG;
+    /// @notice The most any swap in a pool on this hook can pay in LP fee, in ppm (20,000 = 2%).
+    /// `feeCap` cannot be set above it, and `beforeSwap` never returns more than `feeCap`.
+    uint24 public constant MAX_FEE = 20_000;
     // no feed worth trusting is a week behind
     uint32 internal constant MAX_STALE_AFTER = 7 days;
     /// @dev Ticks the guard must clear beyond the fee cap's dead band. The oracle can trail the
@@ -111,12 +111,6 @@ contract BandHook is IUnlockCallback {
     /// @dev The guard may be at most this many times its own minimum (dead band plus margin): a
     /// wider guard lets anyone have the book placed further from the oracle.
     uint256 internal constant MAX_GUARD_MULT = 4;
-    // in-swap recenter gas: the least an attempt starts with (the dearest measured attempt is about
-    // 555k cold, about 600k with tokens donated to the hook), the most it may spend, and what is
-    // always kept back: a route needing a little under TAIL_GAS after this pool always goes through
-    uint256 internal constant RECENTER_GAS = 600_000;
-    uint256 internal constant RECENTER_MAX_GAS = 1_000_000;
-    uint256 internal constant TAIL_GAS = 300_000;
     // the most one price read may use; a cold Chainlink read is about 20k
     uint256 internal constant SOURCE_GAS = 200_000;
 
@@ -126,9 +120,6 @@ contract BandHook is IUnlockCallback {
     event SourceChanged(PoolId indexed id, address oldSource, address newSource, int24 newTick);
     event Funded(PoolId indexed id, uint256 amount0, uint256 amount1);
     event Recentered(PoolId indexed id, int24 oracleTick, int24 lower, int24 upper, uint128 liquidity);
-    /// @notice An in-swap recenter was due and attempted, and was undone. `reason` is the first four
-    /// bytes of the revert (an error selector), or zero when nothing came back.
-    event RecenterSkipped(PoolId indexed id, bytes4 reason);
     event Withdrawn(PoolId indexed id, uint256 amount0, uint256 amount1);
     event Swept(Currency indexed currency, address indexed to, uint256 amount);
 
@@ -145,8 +136,6 @@ contract BandHook is IUnlockCallback {
     error TransferFailed();
     error SourceTickMismatch(int24 expected, int24 actual);
     error EmptyBand();
-    error NotSelf();
-    error Unsettled();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -202,17 +191,15 @@ contract BandHook is IUnlockCallback {
     }
 
     /// @notice Tune parameters on a live pool. The price source cannot be changed here;
-    /// use `setSource`, which validates the replacement. The two switches are not changed here
-    /// either, only by `setAutoRecenter` and `setEnabled`, so a routine update cannot flip them.
+    /// use `setSource`, which validates the replacement. The `enabled` switch is not changed here
+    /// either, only by `setEnabled`, so a routine update cannot flip it.
     function setParams(PoolId id, PoolConfig calldata cfg) external onlyOwner {
         PoolConfig storage c = config[id];
         if (address(c.source) == address(0)) revert NotEnabled();
         if (address(cfg.source) != address(c.source)) revert BadConfig();
         _validate(cfg);
-        bool autoOn = c.autoRecenter;
         bool on = c.enabled;
         config[id] = cfg;
-        config[id].autoRecenter = autoOn;
         config[id].enabled = on;
         emit Configured(id);
     }
@@ -246,17 +233,7 @@ contract BandHook is IUnlockCallback {
         emit SourceChanged(id, old, address(newSource), newTick);
     }
 
-    /// @notice Turn the in-swap recenter on or off for one pool. Owner only. The manual
-    /// `recenter` is unaffected. The one lever over the swap path on a contract that cannot be
-    /// upgraded, so it takes a single field rather than a whole config.
-    function setAutoRecenter(PoolId id, bool on) external onlyOwner {
-        PoolConfig storage cfg = config[id];
-        if (address(cfg.source) == address(0)) revert NotEnabled();
-        cfg.autoRecenter = on;
-        emit Configured(id);
-    }
-
-    /// @notice Turn `fund` and `recenter` (manual and in-swap) on or off for one pool. Owner only.
+    /// @notice Turn `fund` and `recenter` on or off for one pool. Owner only.
     /// Swaps keep trading whatever is placed; to stop that, `withdraw`.
     function setEnabled(PoolId id, bool on) external onlyOwner {
         PoolConfig storage cfg = config[id];
@@ -274,18 +251,17 @@ contract BandHook is IUnlockCallback {
     /// taken on input needs a gap of fee / (1 - fee), and Uniswap charges its protocol fee on
     /// top of ours, so the worst case adds the protocol maximum. Counting 0.01% per tick
     /// overstates the gap, the safe direction; `GUARD_MARGIN_TICKS` covers the rounding and an
-    /// oracle that trails the market. A fee at or above 100% has no finite dead band.
+    /// oracle that trails the market.
     function _validate(PoolConfig calldata cfg) internal pure {
         if (address(cfg.source) == address(0)) revert BadConfig();
-        if (cfg.feeFloor > cfg.feeCap || cfg.feeCap > LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
+        if (cfg.feeFloor > cfg.feeCap || cfg.feeCap > MAX_FEE) revert BadConfig();
         if (cfg.staleAfter == 0 || cfg.staleAfter > MAX_STALE_AFTER) revert BadConfig();
         if (cfg.halfBandTicks <= 0 || cfg.triggerTicks <= 0 || cfg.guardTicks <= 0) revert BadConfig();
         // outside the band the price escapes `_fitBounds` and the position is placed one-sided
         if (cfg.guardTicks >= cfg.halfBandTicks || cfg.triggerTicks >= cfg.halfBandTicks) {
             revert BadConfig();
         }
-        uint256 fee = uint256(cfg.feeCap) + ProtocolFeeLibrary.MAX_PROTOCOL_FEE;
-        if (fee >= LPFeeLibrary.MAX_LP_FEE) revert BadConfig();
+        uint256 fee = uint256(cfg.feeCap) + ProtocolFeeLibrary.MAX_PROTOCOL_FEE; // under 100%: feeCap <= MAX_FEE
         uint256 deadBandTicks = fee * 10_000 / (LPFeeLibrary.MAX_LP_FEE - fee);
         if (uint256(int256(cfg.guardTicks)) <= deadBandTicks + GUARD_MARGIN_TICKS) revert BadConfig();
         if (uint256(int256(cfg.guardTicks)) > MAX_GUARD_MULT * (deadBandTicks + GUARD_MARGIN_TICKS)) {
@@ -297,7 +273,7 @@ contract BandHook is IUnlockCallback {
         if (cfg.backstopHalfTicks > TickMath.MAX_TICK) revert BadConfig();
     }
 
-    // ---------- hook callbacks (only the three flagged ones are ever called)
+    // ---------- hook callbacks (only the two flagged ones are ever called)
 
     function afterInitialize(address, PoolKey calldata key, uint160, int24) external returns (bytes4) {
         if (msg.sender != address(manager)) revert NotManager();
@@ -314,6 +290,8 @@ contract BandHook is IUnlockCallback {
         manager.updateDynamicLPFee(keys[id], cfg.feeFloor);
     }
 
+    /// @notice The swap's LP fee: the floor plus a slope on the pool-vs-oracle gap, never above
+    /// `feeCap` (itself at most `MAX_FEE`); `feeCap` when there is no usable price. Returns no delta.
     function beforeSwap(address, PoolKey calldata key, SwapParams calldata, bytes calldata)
         external
         returns (bytes4, BeforeSwapDelta, uint24)
@@ -333,20 +311,6 @@ contract BandHook is IUnlockCallback {
             fee = f >= cfg.feeCap ? cfg.feeCap : uint24(f);
         }
         return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
-    }
-
-    /// @notice Recenters at the end of a swap that makes it due, for pools with `autoRecenter`.
-    /// Never fails the swap: every gate that says no skips, and the recenter itself runs as a
-    /// call that is undone whole if anything inside it fails. The trader's amounts were fixed
-    /// before this runs, and no delta is returned, so they cannot change.
-    function afterSwap(address, PoolKey calldata key, SwapParams calldata, BalanceDelta, bytes calldata)
-        external
-        returns (bytes4, int128)
-    {
-        if (msg.sender != address(manager)) revert NotManager();
-        PoolId id = key.toId();
-        if (_recenterDueInSwap(id)) _tryRecenter(id);
-        return (IHooks.afterSwap.selector, 0);
     }
 
     // ---------- funding / recentering / withdrawal
@@ -396,23 +360,6 @@ contract BandHook is IUnlockCallback {
         manager.unlock(abi.encode(Action.RECENTER, id));
     }
 
-    /// @notice Not for outside callers. `afterSwap` calls it through this contract's own address,
-    /// because a failure can only be undone across a call. Runs the same gates, burns and mints as
-    /// `recenter`, inside the swapper's unlock, then settles. Fails unless the hook's balances with
-    /// the PoolManager are back to zero and no currency is left synced, so the swap's own payment
-    /// finds the PoolManager exactly as it was.
-    function recenterInSwap(PoolId id) external {
-        if (msg.sender != address(this)) revert NotSelf();
-        PoolKey memory key = keys[id];
-        _place(key, id, false);
-        _settleAll(key);
-        if (
-            manager.currencyDelta(address(this), key.currency0) != 0
-                || manager.currencyDelta(address(this), key.currency1) != 0
-                || !manager.getSyncedCurrency().isAddressZero()
-        ) revert Unsettled();
-    }
-
     /// @notice Burn everything and send all balances of both tokens to the owner.
     function withdraw(PoolId id) external onlyOwner {
         manager.unlock(abi.encode(Action.WITHDRAW, id));
@@ -457,55 +404,12 @@ contract BandHook is IUnlockCallback {
         return "";
     }
 
-    // ---------- in-swap recenter
-
-    /// @dev The cheap gates, in the order most swaps leave them; nothing here writes. Gas comes
-    /// first, so a swap sent without room for a recenter pays almost nothing extra; `TAIL_GAS`
-    /// also covers the reads below. An empty core means the pool is not funded yet, was
-    /// withdrawn, or has left the band with everything in the limit: the owner's or a keeper's
-    /// call, not a trader's, since the manual path recenters an empty core without the trigger.
-    /// A currency synced but not settled means the router is part-way through paying; syncing
-    /// over it would break its payment.
-    function _recenterDueInSwap(PoolId id) internal view returns (bool) {
-        if (gasleft() < RECENTER_GAS + TAIL_GAS) return false;
-        PoolConfig storage cfg = config[id];
-        if (!cfg.enabled || !cfg.autoRecenter) return false;
-        Pos memory c = core[id];
-        if (c.liquidity == 0) return false;
-        (int24 oracleTick, bool fresh) = _oracleTick(cfg);
-        if (!fresh || _absDiff(oracleTick, c.center) <= uint256(int256(cfg.triggerTicks))) return false;
-        (, int24 poolTick,,) = manager.getSlot0(id);
-        if (_absDiff(poolTick, oracleTick) > uint256(int256(cfg.guardTicks))) return false;
-        return manager.getSyncedCurrency().isAddressZero();
-    }
-
-    /// @dev Runs `recenterInSwap` as a call to this contract, so that anything failing inside it is
-    /// undone whole, the PoolManager's bookkeeping included, and the swap carries on. The call gets
-    /// everything but `TAIL_GAS`, up to `RECENTER_MAX_GAS`, and copies no return data, so nothing
-    /// inside it can spend the gas the rest of the swap needs. Only the first four bytes of a
-    /// revert are kept, for the event.
-    function _tryRecenter(PoolId id) internal {
-        uint256 left = gasleft();
-        if (left < RECENTER_GAS + TAIL_GAS) return; // the checks above cost gas too
-        uint256 budget = left - TAIL_GAS;
-        if (budget > RECENTER_MAX_GAS) budget = RECENTER_MAX_GAS;
-        bytes memory data = abi.encodeCall(this.recenterInSwap, (id));
-        bool ok;
-        bytes4 reason;
-        assembly ("memory-safe") {
-            ok := call(budget, address(), 0, add(data, 0x20), mload(data), 0, 0)
-            if and(iszero(ok), gt(returndatasize(), 3)) {
-                returndatacopy(0, 0, 4)
-                reason := and(mload(0), shl(224, 0xffffffff))
-            }
-        }
-        if (!ok) emit RecenterSkipped(id, reason);
-    }
+    // ---------- placement
 
     /// @dev Checks the oracle and the pool price, then burns the live core and limit and mints
     /// them again around the oracle with everything the hook holds. Needs the PoolManager
-    /// unlocked: runs from `unlockCallback` for `fund` and `recenter`, and from `recenterInSwap`
-    /// during a swap. The pool price is read once, and every check and mint use that one read.
+    /// unlocked: runs from `unlockCallback` for `fund` and `recenter`. The pool price is read
+    /// once, and every check and mint use that one read.
     /// @dev The hook keeps one core record and one limit record per pool, and this burns both
     /// before the mints. Minting over a live position would leave liquidity no call can reach: the
     /// record holds the only copy of its bounds, and no function accepts arbitrary ones.

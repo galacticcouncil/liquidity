@@ -12,7 +12,7 @@
 set -euo pipefail
 
 KEY="($CURRENCY0,$CURRENCY1,8388608,$TICK_SPACING,$HOOK)"
-CONFIG_SIG='config(bytes32)(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool,bool)'
+CONFIG_SIG='config(bytes32)(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool)'
 MAX=$(cast max-uint)
 
 send() { cast send "$@" --private-key "$ATTACKER_PK" -r "$RPC" > /dev/null; }
@@ -55,14 +55,13 @@ add-liquidity)
   echo "  the attacker placed liquidity $liq in ticks [$lower, $upper] (oracle $o, pool $(pool_tick))"
   ;;
 owner-calls)
-  CFG="(0x0000000000000000000000000000000000000000,0,0,0,0,0,0,0,0,0,false,false)"
+  CFG="(0x0000000000000000000000000000000000000000,0,0,0,0,0,0,0,0,0,false)"
   calls=(
     "acceptOwnership()"
     "transferOwnership(address) $ATTACKER"
-    "configure((address,address,uint24,int24,address),(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool,bool)) $KEY $CFG"
-    "setParams(bytes32,(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool,bool)) $POOL_ID $CFG"
+    "configure((address,address,uint24,int24,address),(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool)) $KEY $CFG"
+    "setParams(bytes32,(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool)) $POOL_ID $CFG"
     "setSource(bytes32,address,int24,int24) $POOL_ID $ATTACKER 0 0"
-    "setAutoRecenter(bytes32,bool) $POOL_ID true"
     "setEnabled(bytes32,bool) $POOL_ID false"
     "fund(bytes32,uint256,uint256) $POOL_ID 0 0"
     "withdraw(bytes32) $POOL_ID"

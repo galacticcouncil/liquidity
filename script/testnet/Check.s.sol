@@ -48,7 +48,7 @@ contract Check is PoolScript {
     function _checkOnOracle(BandHook hook, PoolId id) internal view returns (uint256 px, uint160 sqrtP, uint24 feeCap) {
         IPriceSource source;
         uint32 staleAfter;
-        (source,, feeCap,, staleAfter,,,,,,,) = hook.config(id);
+        (source,, feeCap,, staleAfter,,,,,,) = hook.config(id);
         (, int24 oracleTick) = _oracle(source, staleAfter);
         (px,) = source.priceX18();
         int24 poolTick;

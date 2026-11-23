@@ -40,7 +40,7 @@ contract BandHookGuardRailsTest is Test {
     PoolKey nativeKey;
     PoolId nativeId;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     uint256 constant FUND = 100_000e18;
     int24 constant HALF = 1000;
 
@@ -105,8 +105,7 @@ contract BandHookGuardRailsTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true,
-            autoRecenter: false
+            enabled: true
         });
     }
 
@@ -143,9 +142,16 @@ contract BandHookGuardRailsTest is Test {
         new BandHook(manager, address(this));
     }
 
+    /// An address that also carries the afterSwap bit is refused: this hook runs no code after a swap.
+    function test_R9_anAddressWithTheAfterSwapBit_reverts() public {
+        address withAfterSwap = address(uint160(0x20000000000000000000000000000000000010c0));
+        vm.expectRevert(BandHook.BadConfig.selector);
+        deployCodeTo("BandHook.sol:BandHook", abi.encode(manager, address(this)), withAfterSwap);
+    }
+
     /// And the mined address is accepted, which the whole suite depends on.
     function test_R9_theMinedAddressIsAccepted() public view {
-        assertEq(uint160(HOOK_ADDR) & 0x3FFF, 0x10C0, "afterInitialize | beforeSwap | afterSwap");
+        assertEq(uint160(HOOK_ADDR) & 0x3FFF, 0x1080, "afterInitialize | beforeSwap");
         assertEq(address(hook), HOOK_ADDR, "and the hook lives there");
     }
 

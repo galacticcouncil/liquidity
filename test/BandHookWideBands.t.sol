@@ -26,7 +26,7 @@ contract BandHookWideBandsTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     bytes32 constant CORE_SALT = bytes32(0);
     bytes32 constant BACKSTOP_SALT = bytes32(uint256(1));
     int24 constant WIDEST_HALF = 221_818; // 4 x this is MAX_TICK, the most _validate accepts
@@ -133,8 +133,7 @@ contract BandHookWideBandsTest is Test {
                 backstopBps: backstopHalf == 0 ? 0 : 3500,
                 triggerTicks: trigger,
                 guardTicks: guard,
-                enabled: true,
-                autoRecenter: false
+                enabled: true
             })
         );
         manager.initialize(key, TickMath.getSqrtPriceAtTick(tick));

@@ -52,7 +52,7 @@ contract WalletFundForkTest is Test {
         vm.createSelectFork("robinhood");
         owner = vm.addr(OWNER_PK);
         // any address with the hook's permission bits will do; 00 mines one through the CREATE2 proxy
-        address at = address((uint160(uint256(keccak256("wallet fund fork test hook"))) & ~uint160(0x3FFF)) | 0x10C0);
+        address at = address((uint160(uint256(keccak256("wallet fund fork test hook"))) & ~uint160(0x3FFF)) | 0x1080);
         deployCodeTo("BandHook.sol:BandHook", abi.encode(MANAGER, deployer), at);
         hook = BandHook(payable(at));
         key = PoolKey(Currency.wrap(address(0)), Currency.wrap(HOLLAR), LPFeeLibrary.DYNAMIC_FEE_FLAG, 10, IHooks(at));
@@ -176,11 +176,6 @@ contract WalletFundForkTest is Test {
         _expectRefusal("the hook's setting differs from the file: FEE_CAP_PPM");
     }
 
-    function test_refuses_anAutoRecenterThatDiffersFromTheFile() public {
-        settings.cfg.autoRecenter = false;
-        _expectRefusal("the hook's setting differs from the file: AUTO_RECENTER");
-    }
-
     function test_refuses_aSourceOnAnotherFeed() public {
         settings.feed = makeAddr("another feed");
         _expectRefusal("the pool's price source does not read FEED for FEED_PRICES");
@@ -192,7 +187,7 @@ contract WalletFundForkTest is Test {
     }
 
     function test_refuses_aPoolNotInitialized() public {
-        address at = address((uint160(uint256(keccak256("wallet fund fork test hook 2"))) & ~uint160(0x3FFF)) | 0x10C0);
+        address at = address((uint160(uint256(keccak256("wallet fund fork test hook 2"))) & ~uint160(0x3FFF)) | 0x1080);
         deployCodeTo("BandHook.sol:BandHook", abi.encode(MANAGER, deployer), at);
         settings.hook = BandHook(payable(at));
         settings.key.hooks = IHooks(at);
@@ -242,7 +237,7 @@ contract WalletFundForkTest is Test {
         script.check(settings, OWNER_PK);
     }
 
-    /// The ETH/HOLLAR settings from the pool's settings file, with the in-swap recenter on.
+    /// The ETH/HOLLAR settings from the pool's settings file.
     function _ethHollarConfig() internal view returns (BandHook.PoolConfig memory) {
         return BandHook.PoolConfig({
             source: source,
@@ -255,8 +250,7 @@ contract WalletFundForkTest is Test {
             backstopBps: 3500,
             triggerTicks: 350,
             guardTicks: 200,
-            enabled: true,
-            autoRecenter: true
+            enabled: true
         });
     }
 
