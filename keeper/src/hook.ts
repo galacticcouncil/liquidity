@@ -9,14 +9,14 @@ import type { PoolRef } from './config.js'
 export const hookAbi = parseAbi([
   'function recenter(bytes32 id)',
   'function manager() view returns (address)',
-  'function config(bytes32 id) view returns (address source, uint24 feeFloor, uint24 feeCap, uint32 feeSlopePpm, uint32 staleAfter, int24 halfBandTicks, int24 backstopHalfTicks, uint16 backstopBps, int24 triggerTicks, int24 guardTicks, bool enabled, bool autoRecenter)',
+  // only the first field, the source: the hook versions differ after it, and decoding stops here
+  'function config(bytes32 id) view returns (address source)',
   'event Recentered(bytes32 indexed id, int24 oracleTick, int24 lower, int24 upper, uint128 liquidity)',
   'error NotEnabled()',
   'error StaleOracle()',
   'error DriftBelowTrigger()',
   'error GuardTripped()',
   'error EmptyBand()',
-  'error Unsettled()',
 ])
 const sourceAbi = parseAbi(['function priceX18() view returns (uint256 priceX18, uint256 updatedAt)'])
 const managerAbi = parseAbi(['function extsload(bytes32 slot) view returns (bytes32)'])
@@ -47,13 +47,13 @@ export async function refusal(client: PublicClient, signer: Signer, pool: PoolRe
 
 export async function readPrices(client: PublicClient, pool: PoolRef): Promise<Prices> {
   const hook = { address: pool.hook, abi: hookAbi } as const
-  const [manager, cfg] = await Promise.all([
+  const [manager, source] = await Promise.all([
     client.readContract({ ...hook, functionName: 'manager' }),
     client.readContract({ ...hook, functionName: 'config', args: [pool.poolId] }),
   ])
   const slot = keccak256(encodeAbiParameters([{ type: 'bytes32' }, { type: 'uint256' }], [pool.poolId, POOLS_SLOT]))
   const [[oraclePriceX18], slot0] = await Promise.all([
-    client.readContract({ address: cfg[0], abi: sourceAbi, functionName: 'priceX18' }),
+    client.readContract({ address: source, abi: sourceAbi, functionName: 'priceX18' }),
     client.readContract({ address: manager, abi: managerAbi, functionName: 'extsload', args: [slot] }),
   ])
   return { oraclePriceX18, sqrtPriceX96: BigInt(slot0) & ((1n << 160n) - 1n) } // slot0's low 160 bits

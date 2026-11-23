@@ -31,7 +31,7 @@ contract BandHookNativeTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
 
     function setUp() public {
         manager = IPoolManager(address(new PoolManager(address(this))));
@@ -64,8 +64,7 @@ contract BandHookNativeTest is Test {
                 backstopBps: 3500,
                 triggerTicks: 350,
                 guardTicks: 200,
-                enabled: true,
-                autoRecenter: false
+                enabled: true
             })
         );
         // tick for price 2500e18: ln(2500)*1e18 / ln(1.0001)*1e18 ≈ 78244

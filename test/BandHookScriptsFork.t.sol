@@ -93,7 +93,7 @@ contract BandHookScriptsForkTest is Test {
         assertTrue(address(hdxHollar) != address(ethHdx), "three different hooks");
         BandHook[3] memory hooks = [ethHollar, hdxHollar, ethHdx];
         for (uint256 i; i < 3; i++) {
-            assertEq(uint160(address(hooks[i])) & 0x3FFF, 0x10C0, "afterInitialize | beforeSwap | afterSwap");
+            assertEq(uint160(address(hooks[i])) & 0x3FFF, 0x1080, "afterInitialize | beforeSwap");
             assertEq(hooks[i].owner(), deployer, "the deployer owns it until the hand-off");
         }
     }
@@ -121,7 +121,7 @@ contract BandHookScriptsForkTest is Test {
         } catch Error(string memory reason) {
             assertEq(_prefix(reason, 17), "source reads tick", "refused by the expected-tick check");
         }
-        (IPriceSource none,,,,,,,,,,,) = ethHollar.config(ethHollarKey.toId());
+        (IPriceSource none,,,,,,,,,,) = ethHollar.config(ethHollarKey.toId());
         assertEq(address(none), address(0), "nothing configured");
 
         _setI("EXPECTED_TICK", _tickOf(ethAnswer, 1e8)); // raw HOLLAR per raw ETH at 18 decimals
@@ -158,7 +158,7 @@ contract BandHookScriptsForkTest is Test {
         } catch Error(string memory reason) {
             assertEq(_prefix(reason, 17), "source reads tick", "refused by the expected-tick check");
         }
-        (IPriceSource none,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
+        (IPriceSource none,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(none), address(0), "nothing configured");
 
         _setA("FEED_A", address(hdxUsd)); // each feed with its own token and limit, HDX's pair first
@@ -168,7 +168,7 @@ contract BandHookScriptsForkTest is Test {
         _setA("FEED_B_PRICES", address(0));
         _setU("FEED_B_MAX_AGE_S", 28 hours);
         new SetupPool().run();
-        (IPriceSource source,,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
+        (IPriceSource source,,,,,,,,,,) = ethHdx.config(ethHdxKey.toId());
         assertEq(address(RatioSource(address(source)).feedBase()), address(ETH_USD), "ETH/USD first");
         _handToTheSafe(ethHdx);
         _fundThroughTheSafe(ethHdxKey);
@@ -199,7 +199,7 @@ contract BandHookScriptsForkTest is Test {
         MANAGER.initialize(hdxHollarKey, TickMath.getSqrtPriceAtTick(expected + 2000));
 
         new SetupPool().run();
-        (IPriceSource source,,,,,,,,,,,) = hdxHollar.config(hdxHollarKey.toId());
+        (IPriceSource source,,,,,,,,,,) = hdxHollar.config(hdxHollarKey.toId());
         assertTrue(address(source) != address(0), "configured");
         assertGt(_gap(hdxHollarKey, expected), 300, "setup does not move the price");
 

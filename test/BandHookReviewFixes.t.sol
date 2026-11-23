@@ -35,7 +35,7 @@ contract BandHookReviewFixesTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     uint256 constant FUND = 100_000e18;
     uint24 constant FLOOR = 3000;
     uint24 constant CAP = 20000;
@@ -106,7 +106,7 @@ contract BandHookReviewFixesTest is Test {
     function test_setSource_stillAcceptsANormalSource() public {
         IPriceSource fresh = IPriceSource(address(new MockPriceSource(1e18)));
         hook.setSource(id, fresh, 0, 10);
-        (IPriceSource now_,,,,,,,,,,,) = hook.config(id);
+        (IPriceSource now_,,,,,,,,,,) = hook.config(id);
         assertEq(address(now_), address(fresh), "replaced");
     }
 
@@ -130,7 +130,7 @@ contract BandHookReviewFixesTest is Test {
         cfg.enabled = false; // a routine update built with the field left at its default
         hook.setParams(id, cfg);
 
-        (,,,,,,,,,, bool enabled,) = hook.config(id);
+        (,,,,,,,,,, bool enabled) = hook.config(id);
         assertTrue(enabled, "still on");
         hook.fund(id, 0, 0); // and fund still works
     }
@@ -208,8 +208,7 @@ contract BandHookReviewFixesTest is Test {
             backstopBps: 0,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true,
-            autoRecenter: false
+            enabled: true
         });
     }
 

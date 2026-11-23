@@ -34,7 +34,7 @@ contract SetupPool is PoolScript {
         PoolKey memory key = _poolKey(address(hook));
         PoolId id = key.toId();
 
-        (IPriceSource source,,,,,,,,,,,) = hook.config(id);
+        (IPriceSource source,,,,,,,,,,) = hook.config(id);
         if (address(source) == address(0)) {
             vm.startBroadcast(pk);
             source = _deploySource(key);

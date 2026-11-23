@@ -42,7 +42,7 @@ contract SafeFund is PoolScript {
         PoolId id = key.toId();
         address safe = hook.owner();
         require(safe.code.length > 0, "the hook's owner is not the Safe yet: run 03_HandOff, then acceptOwnership");
-        (IPriceSource source,,,, uint32 staleAfter,,,,,,,) = hook.config(id);
+        (IPriceSource source,,,, uint32 staleAfter,,,,,,) = hook.config(id);
         require(address(source) != address(0), "pool not configured: run 01_SetupPool first");
         (uint160 target,) = _oracle(source, staleAfter);
 

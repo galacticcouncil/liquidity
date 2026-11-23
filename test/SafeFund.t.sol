@@ -29,7 +29,7 @@ contract SafeFundTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     uint256 constant MAX0 = 1e18; // the anchor's cap per token
     uint256 constant MAX1 = 1e18;
     uint256 constant AMOUNT = 10e18; // what the Safe funds, of each token
@@ -103,8 +103,7 @@ contract SafeFundTest is Test {
             backstopBps: 0,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true,
-            autoRecenter: false
+            enabled: true
         });
     }
 

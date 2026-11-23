@@ -14,7 +14,6 @@ import {Currency} from "v4-core/types/Currency.sol";
 import {SwapParams} from "v4-core/types/PoolOperation.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
-import {FullMath} from "v4-core/libraries/FullMath.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {CustomRevert} from "v4-core/libraries/CustomRevert.sol";
@@ -37,7 +36,7 @@ contract BandHookDeadSourceTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     uint256 constant FUND = 100_000e18;
     uint24 constant FLOOR = 3000;
     uint24 constant CAP = 20000;
@@ -128,22 +127,6 @@ contract BandHookDeadSourceTest is Test {
         assertEq(_swapFee(key), CAP, "a malformed answer counts as failed");
     }
 
-    function test_aDeadSource_inSwapRecenterSkips() public {
-        // make a recenter due: the oracle moves 600 ticks (trigger 500) and the pool follows it
-        source.set(_priceAt(600), block.timestamp);
-        _pushPoolTo(600);
-        hook.setAutoRecenter(id, true);
-        assertEq(_coreCenter(), 0, "the band is still quoted around tick 0");
-
-        source.kill();
-        _swapFee(key);
-        assertEq(_coreCenter(), 0, "no recenter is attempted while the source is dead");
-
-        source.revive();
-        _swapFee(key);
-        assertApproxEqAbs(_coreCenter(), 600, 1, "the same swap recenters once the source answers: it was due");
-    }
-
     function test_aNeverConfiguredPool_refusesSwaps() public {
         PoolKey memory stranger = key;
         stranger.tickSpacing = 60; // a pool on our hook that nobody configured
@@ -180,8 +163,7 @@ contract BandHookDeadSourceTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true,
-            autoRecenter: false
+            enabled: true
         });
     }
 
@@ -197,22 +179,6 @@ contract BandHookDeadSourceTest is Test {
         return _feeIn(vm.getRecordedLogs());
     }
 
-    /// @dev Buys token0 until the pool reaches `tick`.
-    function _pushPoolTo(int24 tick) internal {
-        swapRouter.swap(
-            key,
-            SwapParams({zeroForOne: false, amountSpecified: -1_000_000e18, sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(tick)}),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-    }
-
-    /// @dev The price, in the 1e18 fixed point a source reports, that sits exactly at `tick`.
-    function _priceAt(int24 tick) internal pure returns (uint256) {
-        uint256 s = TickMath.getSqrtPriceAtTick(tick);
-        return FullMath.mulDiv(s, s * 1e18, 1 << 192);
-    }
-
     function _feeIn(Vm.Log[] memory logs) internal pure returns (uint24) {
         bytes32 swapTopic = keccak256("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)");
         for (uint256 i = 0; i < logs.length; i++) {
@@ -222,9 +188,5 @@ contract BandHookDeadSourceTest is Test {
             }
         }
         revert("no swap event");
-    }
-
-    function _coreCenter() internal view returns (int24 center) {
-        (,, center,) = hook.core(id);
     }
 }

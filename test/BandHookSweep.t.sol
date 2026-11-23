@@ -25,7 +25,7 @@ contract BandHookSweepTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     Currency constant ETH = Currency.wrap(address(0));
     uint256 constant FUND = 100_000e18;
 
@@ -75,8 +75,7 @@ contract BandHookSweepTest is Test {
                 backstopBps: 3500,
                 triggerTicks: 500,
                 guardTicks: 300,
-                enabled: true,
-                autoRecenter: false
+                enabled: true
             })
         );
         manager.initialize(key, TickMath.getSqrtPriceAtTick(0));

@@ -44,8 +44,7 @@ abstract contract PoolScript is Script {
             backstopBps: uint16(vm.envUint("BACKSTOP_BPS")),
             triggerTicks: int24(int256(vm.envInt("TRIGGER_TICKS"))),
             guardTicks: int24(int256(vm.envInt("GUARD_TICKS"))),
-            enabled: true,
-            autoRecenter: vm.envOr("AUTO_RECENTER", false)
+            enabled: true
         });
     }
 

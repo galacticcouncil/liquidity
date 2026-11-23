@@ -15,7 +15,7 @@ owner=$(cast call "$HOOK" 'owner()(address)' -r "$RPC")
 [ "$owner" = "$OWNER" ] || { echo "  the owner does not own $HOOK yet (owner $owner): acceptOwnership first"; exit 1; }
 
 KEY="($CURRENCY0,$CURRENCY1,8388608,$TICK_SPACING,$HOOK)"
-SRC=$(cast call "$HOOK" 'config(bytes32)(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool,bool)' "$POOL_ID" -r "$RPC" | head -1)
+SRC=$(cast call "$HOOK" 'config(bytes32)(address,uint24,uint24,uint32,uint32,int24,int24,uint16,int24,int24,bool)' "$POOL_ID" -r "$RPC" | head -1)
 PX=$(cast call "$SRC" 'priceX18()(uint256,uint256)' -r "$RPC" | head -1 | awk '{print $1}')
 # the oracle price as a pool price, the same sum as PoolScript._sqrtPriceX96
 TARGET=$(python3 -I -c "import math; print(math.isqrt($PX * 2**128 // 10**18) << 32)")

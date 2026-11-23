@@ -32,7 +32,7 @@ contract BandHookValidateConfigTest is Test {
     PoolKey key;
     PoolId id;
 
-    address constant HOOK_ADDR = address(uint160(0x10000000000000000000000000000000000010c0));
+    address constant HOOK_ADDR = address(uint160(0x1000000000000000000000000000000000001080));
     int24 constant MAX_TICK = TickMath.MAX_TICK; // 887272
     int24 constant MAX_HALF_BAND = MAX_TICK / 4; // halfBandTicks * MAX_EXTENSION_MULT must fit
 
@@ -76,8 +76,7 @@ contract BandHookValidateConfigTest is Test {
             backstopBps: 3000,
             triggerTicks: 500,
             guardTicks: 300,
-            enabled: true,
-            autoRecenter: false
+            enabled: true
         });
     }
 
@@ -107,8 +106,8 @@ contract BandHookValidateConfigTest is Test {
 
     // ---------- the fee ceiling
 
-    /// Exactly 100% is the largest fee Uniswap accepts, but at 100% arbitrage never pays, so no
-    /// guard can clear the dead band. Refused even with the widest band and guard allowed.
+    /// Exactly 100% is the largest fee Uniswap accepts; it is far above MAX_FEE, so refused even
+    /// with the widest band and guard allowed.
     function test_feeCap_atMaxLpFee_isRejected() public {
         BandHook.PoolConfig memory cfg = _base();
         cfg.feeCap = LPFeeLibrary.MAX_LP_FEE;
@@ -275,7 +274,7 @@ contract BandHookValidateConfigTest is Test {
         _expectRejected(cfg);
         cfg.guardTicks = 265;
         hook.configure(key, cfg);
-        (,,,,,,,,, int24 stored,,) = hook.config(id);
+        (,,,,,,,,, int24 stored,) = hook.config(id);
         assertEq(stored, 265, "the first accepted guard at a 2% cap");
 
         PoolKey memory k2 = key;
@@ -286,8 +285,35 @@ contract BandHookValidateConfigTest is Test {
         hook.configure(k2, cfg);
         cfg.guardTicks = 162;
         hook.configure(k2, cfg);
-        (,,,,,,,,, stored,,) = hook.config(k2.toId());
+        (,,,,,,,,, stored,) = hook.config(k2.toId());
         assertEq(stored, 162, "the first accepted guard at a 1% cap");
+    }
+
+    // ---------- the fee can never exceed MAX_FEE
+
+    /// Bob tries a 2.0001% cap, at configure and later through setParams: both refused.
+    function test_feeCapAboveMaxFee_isRejected() public {
+        assertEq(hook.MAX_FEE(), 20_000, "the ceiling is 2%");
+        BandHook.PoolConfig memory cfg = _base();
+        cfg.feeCap = hook.MAX_FEE() + 1;
+        _expectRejected(cfg);
+
+        hook.configure(key, _base());
+        vm.expectRevert(BandHook.BadConfig.selector);
+        hook.setParams(id, cfg);
+        (,, uint24 cap,,,,,,,,) = hook.config(id);
+        assertEq(cap, _base().feeCap, "the live cap is unchanged");
+    }
+
+    /// At the ceiling, the widest gap a pool can show still pays exactly MAX_FEE.
+    function test_feeAtTheCeiling_neverExceedsMaxFee() public {
+        BandHook.PoolConfig memory cfg = _base();
+        cfg.feeCap = hook.MAX_FEE();
+        hook.configure(key, cfg);
+        manager.initialize(key, TickMath.getSqrtPriceAtTick(0));
+        hook.fund(id, 1_000_000e18, 1_000_000e18);
+        source.set(10e18, block.timestamp); // the oracle 10x away: a gap of about 23,000 ticks
+        assertEq(_swapFee(-1e18), hook.MAX_FEE(), "the slope stops at MAX_FEE");
     }
 
     /// Bob's live pool has guard 300. setParams down to 200 is refused, and 300 stays.
@@ -297,7 +323,7 @@ contract BandHookValidateConfigTest is Test {
         tighter.guardTicks = 200;
         vm.expectRevert(BandHook.BadConfig.selector);
         hook.setParams(id, tighter);
-        (,,,,,,,,, int24 guard,,) = hook.config(id);
+        (,,,,,,,,, int24 guard,) = hook.config(id);
         assertEq(guard, 300, "the live guard is unchanged");
     }
 }

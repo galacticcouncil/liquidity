@@ -131,47 +131,20 @@ idle amounts such as a donation.
 `setSource` is the recovery path for a dead feed: owner-only, validates the
 replacement against an expected tick, never calls the old source.
 
-`setEnabled(poolId, false)` stops `fund` and `recenter` (manual and in-swap)
-for one pool; `setParams` never changes it. Swaps keep trading whatever is
+`setEnabled(poolId, false)` stops `fund` and `recenter` for one pool;
+`setParams` never changes it. Swaps keep trading whatever is
 placed: to stop trading against the hook's capital, `withdraw`.
 
-## In-swap recenter (per pool, off by default)
+## Recentering and the fee ceiling
 
-A pool with `autoRecenter` on is also recentered at the end of the swap that
-makes it due (the hook's `afterSwap`), so no keeper is needed in the usual
-case. The trader whose swap triggers it pays the extra gas: about 390–420k
-measured through the Universal Router on a fork of this chain (ETH/HOLLAR),
-up to about 560k in the dearest natural case measured (a second recenter on
-an HDX pool); roughly $0.10–0.13 at a typical base fee. Every other swap pays
-about 12k for the checks.
-
-- **It never fails a swap.** It is skipped whenever a gate says no: the same
-  gates as `recenter()`, plus a non-empty core, no currency part-way through
-  payment in the PoolManager, and at least 900k gas left (600k for the
-  attempt, 300k kept for the rest of the trader's transaction). An attempt
-  that does run is a call the hook makes to itself: if anything inside fails,
-  all of it is undone and the hook emits `RecenterSkipped(poolId, reason)`
-  (the error's first four bytes, or zero when nothing came back, usually
-  because it ran out of gas).
-- **An empty core is the keeper's job.** After a full band exit the recenter
-  leaves no core and the limit holding everything; swaps then skip, and
-  `recenter()`, which needs no trigger in that state, places it again.
-- **What it guarantees, and the one gap:** the attempt never touches the last
-  300k, so a route with a little under 300k gas of work after this pool (about
-  290k) always goes through. A longer route whose gas was estimated before the recenter became
-  due can run out when the hook sees just enough gas to try: the attempt costs
-  up to ~555k (~600k with tokens donated to the hook), so the gap starts at
-  ~315–345k of work after this pool. 8 to 9 of 1,512 real v4 swaps on this
-  chain had that shape.
-- **How often it fires:** only swaps sent with that much gas to spare can pay
-  for it: about a quarter of real v4 swaps here, mostly bots and aggregators,
-  and about 5% of wallet trades through the Universal Router.
-- **Switch:** `setAutoRecenter(poolId, on)`, owner only. `setParams` never
-  changes it. `01_SetupPool` reads `AUTO_RECENTER` (default `false`).
-- **Fallback:** the manual `recenter()` is unchanged. Keep a keeper that calls
-  it when due; as a backup to the in-swap path, a one-hour delay is enough.
-- **Address:** the hook carries `afterInitialize | beforeSwap | afterSwap`
-  (`0x10C0`); `00_DeployBandHook` mines for it and the constructor checks it.
+- **Swaps never move liquidity.** The hook has no `afterSwap`: its address carries
+  `afterInitialize | beforeSwap` (`0x1080`), `00_DeployBandHook` mines for it and the
+  constructor refuses any other set. Recentering happens only in its own transaction, through
+  the permissionless `recenter()`, which `keeper/` calls when it is due.
+- **The hook's LP fee never exceeds 2%.** `MAX_FEE` (20,000 ppm) is a constant in the bytecode.
+  `configure` and `setParams` refuse a `feeCap` above it, and `beforeSwap` never returns more
+  than `feeCap`, so the owner can tune the LP fee only between 0 and 2%. ETH/HOLLAR starts at a
+  1% cap. Uniswap's own protocol fee, when switched on, is charged on top (at most 0.1%).
 
 ## Post-launch monitoring
 
@@ -183,10 +156,7 @@ the guards decide. `keeper/` calls it on a timer; see `keeper/README.md`. Watchd
 - feed `updatedAt` older than its heartbeat + margin,
 - idle (unplaced) inventory above X% of position value,
 - pool price pinned at `guardTicks` distance from the oracle for hours
-  (fee dead-band or manipulation — investigate either way),
-- any `RecenterSkipped`: one is noise; repeats mean the in-swap recenter cannot
-  complete and every due swap pays for a failed attempt — switch that pool's
-  `autoRecenter` off and investigate.
+  (fee dead-band or manipulation — investigate either way).
 
 **Not audited externally.** Internal audit in PR #1; the hook custodies the LP
 capital — cap the pilot size until an external audit lands.
