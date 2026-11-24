@@ -10,7 +10,7 @@ import { TxButton, type TxContext } from './TxButton'
 import { Card } from './ui'
 
 type Props = { pool: Pool; s: PoolState; ctx: TxContext }
-type NumberKey = Exclude<keyof HookConfig, 'source' | 'enabled' | 'autoRecenter'>
+type NumberKey = Exclude<keyof HookConfig, 'source' | 'enabled'>
 
 const FIELDS: [NumberKey, string][] = [
   ['feeFloor', 'Fee floor (ppm, 800 = 0.08%)'],

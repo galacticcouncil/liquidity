@@ -39,7 +39,7 @@ describe('funding checks', () => {
   })
 
   it('a differing setting blocks taking the hook over, but not the owner who changed it later', () => {
-    const changed = { cfg: { ...pool.expected, autoRecenter: false } }
+    const changed = { cfg: { ...pool.expected, guardTicks: 300 } }
     expect(fundingProblems(pool, launch(changed), ETH, caps)).toEqual([expect.stringMatching(/before accepting it/)])
     expect(fundingProblems(pool, launch({ ...changed, owner: OWNER }), ETH, caps)).toEqual([])
   })

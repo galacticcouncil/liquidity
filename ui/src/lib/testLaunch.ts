@@ -17,7 +17,7 @@ const empty = { lower: 0, upper: 0, center: 0, liquidity: 0n }
 
 export function launch(over: Partial<PoolState> = {}, wallet: Partial<WalletState> = {}): PoolState {
   return {
-    id: '0x14f58518054cb26b7b029a4c1ccce1dbfec4db50192362d3b001ef61e476b16e',
+    id: '0x8ea02c37745460cde450ca5d272c509a4e9ba1172afe8441ce9e25d6d3f145e9',
     owner: DEPLOYER,
     pendingOwner: OWNER,
     cfg: { ...pool.expected },

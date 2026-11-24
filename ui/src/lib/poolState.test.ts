@@ -6,7 +6,7 @@ import { decodeSlot0, poolId } from './poolState'
 
 describe('poolState', () => {
   it('the ETH/HOLLAR pool id is the one 01_SetupPool created', () => {
-    expect(poolId(POOLS[0])).toBe('0x14f58518054cb26b7b029a4c1ccce1dbfec4db50192362d3b001ef61e476b16e')
+    expect(poolId(POOLS[0])).toBe('0x8ea02c37745460cde450ca5d272c509a4e9ba1172afe8441ce9e25d6d3f145e9')
   })
 
   it('slot0 splits into price, tick and fee', () => {

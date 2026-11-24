@@ -1,4 +1,4 @@
-// Every other BandHook call: hand the hook on, switch the pool or its in-swap recenter, recenter, take
+// Every other BandHook call: hand the hook on, switch the pool, recenter, take
 // everything out, sweep, and the settings forms. Each is dry-run first, so a refusal shows its reason.
 import { useState } from 'react'
 import { encodeFunctionData, isAddress, isAddressEqual, zeroAddress, type Address, type Hex } from 'viem'
@@ -27,9 +27,6 @@ export function ManagePanel({ pool, s, ctx }: Props) {
         <p className="muted">Off stops fund and recenter. Swaps keep trading what is placed; to stop that, take everything out.</p>
         <TxButton label={`Switch the pool ${s.cfg.enabled ? 'off' : 'on'}`} ctx={ctx}
           tx={hook(encodeFunctionData({ abi: bandHookAbi, functionName: 'setEnabled', args: [s.id, !s.cfg.enabled] }))} />
-        <p className="muted">In-swap recenter: the swap that makes a recenter due also does it, paid by that trader.</p>
-        <TxButton label={`Turn in-swap recenter ${s.cfg.autoRecenter ? 'off' : 'on'}`} ctx={ctx}
-          tx={hook(encodeFunctionData({ abi: bandHookAbi, functionName: 'setAutoRecenter', args: [s.id, !s.cfg.autoRecenter] }))} />
       </Card>
       <Card title="Recenter">
         <p className="lead">{recenter.reason}</p>

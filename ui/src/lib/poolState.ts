@@ -76,9 +76,9 @@ export async function readPool(client: PublicClient, pool: Pool, wallet?: Addres
     balanceOf(client, pool.token1.address, pool.hook),
   ])
   const [source, feeFloor, feeCap, feeSlopePpm, staleAfter, halfBandTicks, backstopHalfTicks, backstopBps,
-    triggerTicks, guardTicks, enabled, autoRecenter] = raw
+    triggerTicks, guardTicks, enabled] = raw
   const cfg: HookConfig = { source, feeFloor, feeCap, feeSlopePpm, staleAfter, halfBandTicks, backstopHalfTicks,
-    backstopBps, triggerTicks, guardTicks, enabled, autoRecenter }
+    backstopBps, triggerTicks, guardTicks, enabled }
   const [oracle, walletState] = await Promise.all([
     readOracle(client, cfg, block.timestamp),
     wallet ? readWallet(client, pool, wallet, anchor) : undefined,

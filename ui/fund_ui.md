@@ -100,11 +100,11 @@ A first funding is usually these five:
 
 | Step | What it does | In MetaMask you should see |
 |---|---|---|
-| Accept ownership of the hook | makes your wallet the hook's owner | to the hook `0x5C9c…50c0`, 0 ETH |
-| Let the hook spend up to N HOLLAR | lets the hook take your HOLLAR at the deposit; N is 1% above the deposit, in case the price feed updates in between | a spending cap for HOLLAR, the hook `0x5C9c…50c0` as spender; leave the cap as it is |
+| Accept ownership of the hook | makes your wallet the hook's owner | to the hook `0x0792…5080`, 0 ETH |
+| Let the hook spend up to N HOLLAR | lets the hook take your HOLLAR at the deposit; N is 1% above the deposit, in case the price feed updates in between | a spending cap for HOLLAR, the hook `0x0792…5080` as spender; leave the cap as it is |
 | Deploy the anchor | your wallet deploys the small helper in `script/PoolAnchor.sol`: only a contract can move a Uniswap v4 price | a contract deployment, 0 ETH |
 | Put the pool price back on the oracle | one swap with the oracle price as its limit; free on an empty pool | to the anchor you just deployed, 0.001 ETH that comes back unused (0 ETH when the price must go up) |
-| Deposit N ETH and M HOLLAR (pink **Deposit** button) | the hook takes both and places them around the oracle price | to the hook `0x5C9c…50c0`, your ETH amount |
+| Deposit N ETH and M HOLLAR (pink **Deposit** button) | the hook takes both and places them around the oracle price | to the hook `0x0792…5080`, your ETH amount |
 
 Sometimes the list is different, and that is fine: when the pool price sits below the oracle there is
 one more step, "Let the anchor spend up to 1 HOLLAR", before the anchor; when the pool is already on the
@@ -147,8 +147,6 @@ it** sends, **Cancel** goes back.
 
 - **Switch the pool off / on**: off stops deposits and recentering for this pool. Swaps still trade
   what is placed; to stop that, take everything out.
-- **Turn in-swap recenter off / on**: whether the swap that makes a recenter due also does it, paid by
-  that trader.
 
 **Recenter**
 
@@ -210,7 +208,7 @@ it** sends, **Cancel** goes back.
 | What | Address |
 |---|---|
 | Your wallet | `0x59197B192F4104982196dA9A003C934736f0aC3D` |
-| Hook | `0x5C9c3b13986d2b9F49849064190C52Da5Ca050c0` |
-| Pool id | `0x14f58518054cb26b7b029a4c1ccce1dbfec4db50192362d3b001ef61e476b16e` |
+| Hook | `0x0792CA8165BD664A501B3c9242B171f9bC665080` |
+| Pool id | `0x8ea02c37745460cde450ca5d272c509a4e9ba1172afe8441ce9e25d6d3f145e9` |
 | HOLLAR | `0xD1dc3517732c98502b5c1ba2389AcA9E9016d89a` |
 | Explorer | https://robinhoodchain.blockscout.com |

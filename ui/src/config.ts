@@ -33,7 +33,6 @@ export type HookConfig = {
   triggerTicks: number
   guardTicks: number
   enabled: boolean
-  autoRecenter: boolean
 }
 
 export type Pool = {
@@ -51,13 +50,13 @@ export type Pool = {
 export const POOLS: Pool[] = [
   {
     name: 'ETH / HOLLAR',
-    hook: '0x5C9c3b13986d2b9F49849064190C52Da5Ca050c0',
+    hook: '0x0792CA8165BD664A501B3c9242B171f9bC665080',
     token0: { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH', decimals: 18 },
     token1: { address: '0xD1dc3517732c98502b5c1ba2389AcA9E9016d89a', symbol: 'HOLLAR', decimals: 18 },
     tickSpacing: 10,
     settingsFile: 'script/mainnet/eth-hollar.env',
     expected: {
-      source: '0x321b83Dfb3ae11e4B8d9A10F83551EC762B5e357',
+      source: '0x4C61C21A1b53453D4d7EE2B9F6d2923BB40835E6',
       feeFloor: 800,
       feeCap: 10_000,
       feeSlopePpm: 1_000_000,
@@ -68,7 +67,6 @@ export const POOLS: Pool[] = [
       triggerTicks: 350,
       guardTicks: 200,
       enabled: true,
-      autoRecenter: true,
     },
     anchorMax0: 10n ** 15n, // 0.001 ETH
     anchorMax1: 10n ** 18n, // 1 HOLLAR

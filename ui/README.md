@@ -54,8 +54,8 @@ not from a Ledger. So the console sends them one by one, with the anchor right b
 
 ## Manage
 
-Hand the hook on (for example to governance) or cancel an offer, accept an offer, switch the pool or its
-in-swap recenter on and off, recenter, force a recenter, sync the fee, take everything out, sweep idle
+Hand the hook on (for example to governance) or cancel an offer, accept an offer, switch the pool
+on and off, recenter, force a recenter, sync the fee, take everything out, sweep idle
 tokens, change the settings, replace the price source.
 
 ## Checks

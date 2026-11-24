@@ -3,10 +3,10 @@
 import { parseAbi } from 'viem'
 
 export const bandHookAbi = parseAbi([
-  'struct PoolConfig { address source; uint24 feeFloor; uint24 feeCap; uint32 feeSlopePpm; uint32 staleAfter; int24 halfBandTicks; int24 backstopHalfTicks; uint16 backstopBps; int24 triggerTicks; int24 guardTicks; bool enabled; bool autoRecenter; }',
+  'struct PoolConfig { address source; uint24 feeFloor; uint24 feeCap; uint32 feeSlopePpm; uint32 staleAfter; int24 halfBandTicks; int24 backstopHalfTicks; uint16 backstopBps; int24 triggerTicks; int24 guardTicks; bool enabled; }',
   'function owner() view returns (address)',
   'function pendingOwner() view returns (address)',
-  'function config(bytes32 id) view returns (address source, uint24 feeFloor, uint24 feeCap, uint32 feeSlopePpm, uint32 staleAfter, int24 halfBandTicks, int24 backstopHalfTicks, uint16 backstopBps, int24 triggerTicks, int24 guardTicks, bool enabled, bool autoRecenter)',
+  'function config(bytes32 id) view returns (address source, uint24 feeFloor, uint24 feeCap, uint32 feeSlopePpm, uint32 staleAfter, int24 halfBandTicks, int24 backstopHalfTicks, uint16 backstopBps, int24 triggerTicks, int24 guardTicks, bool enabled)',
   'function core(bytes32 id) view returns (int24 lower, int24 upper, int24 center, uint128 liquidity)',
   'function backstop(bytes32 id) view returns (int24 lower, int24 upper, int24 center, uint128 liquidity)',
   'function limit(bytes32 id) view returns (int24 lower, int24 upper, int24 center, uint128 liquidity)',
@@ -17,7 +17,6 @@ export const bandHookAbi = parseAbi([
   'function withdraw(bytes32 id)',
   'function sweep(address currency, address to, uint256 amount)',
   'function setEnabled(bytes32 id, bool on)',
-  'function setAutoRecenter(bytes32 id, bool on)',
   'function setParams(bytes32 id, PoolConfig cfg)',
   'function setSource(bytes32 id, address newSource, int24 expectedTick, int24 tolerance)',
   'function syncFee(bytes32 id)',
@@ -34,8 +33,6 @@ export const bandHookAbi = parseAbi([
   'error TransferFailed()',
   'error SourceTickMismatch(int24 expected, int24 actual)',
   'error EmptyBand()',
-  'error NotSelf()',
-  'error Unsettled()',
 ])
 
 export const poolAnchorAbi = parseAbi([

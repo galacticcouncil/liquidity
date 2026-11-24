@@ -82,7 +82,6 @@ const LABELS: Record<keyof HookConfig, string> = {
   triggerTicks: 'Recenter trigger',
   guardTicks: 'Guard',
   enabled: 'Switched on',
-  autoRecenter: 'Recenter inside swaps',
 }
 
 /** One setting as a person reads it: fees as percentages, times as durations, widths in ticks. */
